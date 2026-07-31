@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Nothing yet.
 
+## [1.0.2] - 2026-07-31
+
+### Fixed
+
+- **Locking a never-saved file made unlocking fail.** Create a new note,
+  lock the session, unlock — and the app reported that encryption failed
+  because the file was not found. On locking it remembered the document's
+  path so it could reopen it afterwards, but a document that has never
+  been saved carries a placeholder name (`untitled.md.gpg`) that has
+  never existed on disk. Unlock then asked gpg to decrypt it, and gpg
+  answered "No such file or directory" — which reads, to someone who has
+  just locked their screen, like the app losing their work. It now
+  remembers a path only when that file actually exists, so unlocking a
+  new file simply returns to an empty session. Saved files are still
+  reopened as before, and a file deleted or unmounted while locked is
+  forgotten rather than failing on the way back in.
+
+- **Unsaved text in a new file could vanish silently.** The same gap had
+  a worse half. A brand-new file has no key of its own, so the encrypted
+  stash that normally protects unsaved edits across a lock had nothing to
+  encrypt to. The automatic locks already refuse to lock in that state,
+  but *Lock Now* proceeded, and the failure went only to stderr — the
+  text was gone with nothing on screen to say so. The locked screen now
+  states plainly that unsaved text was discarded, and why, and how to
+  stop it happening again: save the file once, or set a fixed stash key
+  in Settings.
+
 ## [1.0.1] - 2026-07-31
 
 ### Added

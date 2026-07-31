@@ -64,6 +64,8 @@ enum State {
     /// unlock, when one was loaded; `held` describes any unsaved edits
     /// that were encrypted to disk on the way out.
     Locked {
+        /// Set when locking discarded unsaved text it could not encrypt.
+        warning: Option<String>,
         relock_path: Option<PathBuf>,
         held: Option<crate::document::stash::StashSummary>,
     },
@@ -77,6 +79,18 @@ enum State {
 /// Fresh, empty document opened directly in edit mode ("New File").
 /// It has no on-disk source yet — the first Encrypt & Save names it and
 /// chooses the encryption method (GPG or age).
+/// The file to reopen after unlocking, if there is one.
+///
+/// A document that has never been saved carries a placeholder path —
+/// `new_empty_document` invents `untitled.md.gpg` — that has never
+/// existed on disk. Remembering it makes the unlock try to decrypt a
+/// file that is not there, which surfaces as gpg's "No such file or
+/// directory" and reads, to the person who just locked their screen,
+/// like the app lost their work.
+fn relock_target(source: &std::path::Path) -> Option<PathBuf> {
+    source.exists().then(|| source.to_path_buf())
+}
+
 fn new_empty_document(file_type: FileType) -> State {
     let ext = match file_type {
         FileType::Markdown => "md",
@@ -456,6 +470,7 @@ impl App {
         self.state = State::Locked {
             relock_path: Some(PathBuf::from("notes.md.gpg")),
             held: None,
+            warning: None,
         };
     }
 
@@ -1073,18 +1088,31 @@ impl App {
             State::Viewing { doc, .. } => Some(doc.source_path.clone()),
             State::ViewingArchive { archive, .. } => Some(archive.source_path.clone()),
             _ => None,
-        };
+        }
+        .and_then(|p| relock_target(&p));
         // Secure any unsaved work before the plaintext is dropped. A
         // failure here is reported but does not stop the lock: callers
         // only reach this point having decided the session must lock, and
         // the alternative — staying unlocked — is the worse outcome.
         // (`can_secure_unsaved_work` is what keeps the *automatic* locks
         // from taking that trade without asking.)
+        let mut warning = None;
         let held = match self.stash_unsaved_work() {
             Ok(true) => crate::document::stash::find(),
             Ok(false) => None,
             Err(e) => {
+                // Reaching here means unsaved work existed and could not
+                // be encrypted — most often a brand-new file, which has
+                // no key of its own to stash to. The lock still happens
+                // (the caller has decided the session must lock), so the
+                // text is gone. That must be said on screen: a warning on
+                // stderr is a warning nobody sees.
                 eprintln!("warning: could not secure unsaved edits: {e:#}");
+                warning = Some(format!(
+                    "Unsaved text could not be held and was discarded — {e}. \
+                     A new file has no key of its own yet; save it once, or set \
+                     a fixed stash key in Settings, and this cannot happen again."
+                ));
                 None
             }
         };
@@ -1092,7 +1120,11 @@ impl App {
         self.jot.open = false;
         self.jot.clear_text();
         ctx.send_viewport_cmd(egui::ViewportCommand::Title("Schl8 — Locked".to_string()));
-        self.state = State::Locked { relock_path, held };
+        self.state = State::Locked {
+            relock_path,
+            held,
+            warning,
+        };
     }
 
     /// Whether unsaved work could be encrypted to disk right now.
@@ -4857,9 +4889,16 @@ impl eframe::App for App {
                 &mut self.view_metrics,
                 column_width,
             ),
-            State::Locked { relock_path, held } => {
-                render_locked(ctx, relock_path.as_deref(), held.as_ref())
-            }
+            State::Locked {
+                relock_path,
+                held,
+                warning,
+            } => render_locked(
+                ctx,
+                relock_path.as_deref(),
+                held.as_ref(),
+                warning.as_deref(),
+            ),
             State::Error {
                 message,
                 failed_path,
@@ -4949,6 +4988,7 @@ impl eframe::App for App {
                 self.state = State::Locked {
                     relock_path: reopen.clone(),
                     held: None,
+                    warning: None,
                 };
                 self.show_toast("Held edits discarded".to_string(), false, ctx);
                 if let Some(path) = reopen {
@@ -6171,6 +6211,7 @@ fn render_locked(
     ctx: &egui::Context,
     relock_path: Option<&std::path::Path>,
     held: Option<&crate::document::stash::StashSummary>,
+    warning: Option<&str>,
 ) -> Transition {
     let mut transition = Transition::None;
 
@@ -6208,6 +6249,33 @@ fn render_locked(
                                 .size(13.0)
                                 .color(theme::text_dim()),
                         );
+
+                        // Unsaved text that could not be encrypted is gone.
+                        // Say it here, plainly, rather than on stderr — this
+                        // screen is where the person actually is.
+                        if let Some(msg) = warning {
+                            ui.add_space(14.0);
+                            egui::Frame::NONE
+                                .fill(theme::accent_red().gamma_multiply(0.10))
+                                .stroke(egui::Stroke::new(1.0, theme::accent_red()))
+                                .corner_radius(theme::RADIUS)
+                                .inner_margin(14.0)
+                                .show(ui, |ui| {
+                                    ui.set_max_width(460.0);
+                                    ui.label(
+                                        egui::RichText::new("Unsaved text was lost")
+                                            .size(14.0)
+                                            .strong()
+                                            .color(theme::accent_red()),
+                                    );
+                                    ui.add_space(4.0);
+                                    ui.label(
+                                        egui::RichText::new(msg)
+                                            .size(12.5)
+                                            .color(theme::text_primary()),
+                                    );
+                                });
+                        }
 
                         ui.add_space(20.0);
 
@@ -6522,5 +6590,46 @@ mod tests {
         assert!(file_identity(&f).is_none());
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod relock_tests {
+    use super::*;
+
+    /// The reported bug: create a new file, lock, unlock — and the app
+    /// tried to decrypt `untitled.md.gpg`, a name that has never been on
+    /// disk. gpg answered "No such file or directory", which read as the
+    /// app losing the document.
+    #[test]
+    fn a_never_saved_document_has_nothing_to_reopen() {
+        let placeholder = new_empty_document(FileType::Markdown);
+        let State::Viewing { doc, .. } = &placeholder else {
+            panic!("new documents open in the viewer");
+        };
+        assert_eq!(doc.source_path, PathBuf::from("untitled.md.gpg"));
+        assert!(
+            relock_target(&doc.source_path).is_none(),
+            "a placeholder path must never become the file to reopen"
+        );
+        // The plain-text variant invents its own placeholder.
+        let State::Viewing { doc, .. } = &new_empty_document(FileType::PlainText) else {
+            panic!("new documents open in the viewer");
+        };
+        assert!(relock_target(&doc.source_path).is_none());
+    }
+
+    /// A real file is still remembered — the fix must not cost the
+    /// ordinary case, where unlocking reopens what you were reading.
+    #[test]
+    fn a_saved_document_is_remembered() {
+        let path = std::env::temp_dir().join(format!("schl8-relock-{}.md.gpg", std::process::id()));
+        std::fs::write(&path, b"ciphertext").unwrap();
+        assert_eq!(relock_target(&path), Some(path.clone()));
+
+        // And once it is gone — deleted or on an unmounted volume — the
+        // app forgets it rather than failing to open it on unlock.
+        std::fs::remove_file(&path).unwrap();
+        assert!(relock_target(&path).is_none());
     }
 }
