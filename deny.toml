@@ -1,0 +1,75 @@
+# cargo-deny configuration — supply-chain policy for Schl8.
+# Run locally with: cargo install cargo-deny && cargo deny check
+
+[graph]
+# Schl8 ships on macOS only. Scoping the dependency graph to the Apple
+# targets excludes Linux/Windows-only transitive crates (GTK3, D-Bus/
+# AT-SPI accessibility, Wayland) that are never compiled into the product,
+# so their advisories aren't reported as false positives against us.
+targets = [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+]
+all-features = true
+
+[advisories]
+# RUSTSEC advisory database. Unmaintained/yanked crates are warnings so
+# they surface without wedging CI; security vulnerabilities should be
+# treated as blocking once the tree is clean.
+version = 2
+yanked = "warn"
+# Consciously-accepted, reviewed advisories. Each must have a justification.
+ignore = [
+    # ttf-parser is unmaintained (ecosystem is migrating to skrifa/
+    # fontations). It reaches us only transitively through egui/ab_glyph
+    # for font parsing; egui 0.31 has no build without it and there is no
+    # safe upgrade yet. "Unmaintained", not a known vulnerability — revisit
+    # when egui adopts fontations.
+    "RUSTSEC-2026-0192",
+    # proc-macro-error2 is unmaintained. It is a BUILD-TIME proc-macro
+    # helper reaching us only through age → i18n-embed-fl (age's localized
+    # error messages, a non-optional dep with no feature to drop it). It
+    # runs only during compilation and is not present in the shipped
+    # binary; there is no safe upgrade. "Unmaintained", not a known
+    # vulnerability — revisit when age/i18n-embed-fl migrate off it.
+    "RUSTSEC-2026-0173",
+]
+
+[licenses]
+version = 2
+# Permissive licenses acceptable for an MIT-licensed app.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "MPL-2.0",
+    "CC0-1.0",
+    "BSL-1.0",
+    "OpenSSL",
+    # Font licenses for egui's embedded default fonts (Ubuntu-Light and
+    # the emoji fonts bundled in epaint). Permissive, redistribution-OK.
+    "OFL-1.1",
+    "Ubuntu-font-1.0",
+]
+confidence-threshold = 0.9
+
+[bans]
+# Flag multiple major versions of the same crate (bloat / audit surface).
+multiple-versions = "warn"
+wildcards = "warn"
+# Deny crates known to have been problematic or that we never want pulled
+# in; empty for now, populated as the audit matures.
+deny = []
+
+[sources]
+# Only crates.io by default; any git/other source must be listed
+# explicitly so a dependency can't silently come from an unvetted origin.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

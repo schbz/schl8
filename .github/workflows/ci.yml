@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      # Needed by the crypto integration tests (real encrypt/decrypt/append
+      # round-trip against an ephemeral keyring). Tests skip if gpg is
+      # absent, but install it so they actually run in CI.
+      - name: Install GnuPG
+        run: brew install gnupg
+
+      - name: Format check
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test
+
+      - name: Build
+        run: cargo build
+
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Advisory scan (RUSTSEC) + license/ban/source policy. deny.toml
+      # scopes the graph to the Apple targets (what actually ships), so
+      # Linux/Windows-only transitive advisories aren't false positives.
+      # Blocking: a new advisory/incompatible license fails CI. Accept a
+      # specific, reviewed item by adding it to deny.toml with a rationale.
+      - name: cargo-deny
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check advisories bans licenses sources

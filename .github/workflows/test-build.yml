@@ -1,0 +1,82 @@
+name: Test build
+
+# Builds exactly what a release would ship, without tagging or
+# publishing anything. Run it from the Actions tab before cutting a
+# release: a tag is permanent and a published release's assets cannot be
+# swapped, so the time to discover a broken bundle is beforehand.
+#
+# The result is an artifact on the run, retained for a week. It is not a
+# release and nobody can find it by browsing the repo.
+
+on:
+  workflow_dispatch:
+    inputs:
+      label:
+        description: "Suffix for the artifact name (e.g. rc1)"
+        required: false
+        default: "testbuild"
+
+permissions:
+  contents: read
+
+jobs:
+  app-bundle:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust targets
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      # The same gates CI runs, so a test build cannot be greener than
+      # the branch it came from.
+      - name: Format check
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test
+
+      - name: Build both architectures
+        run: |
+          cargo build --release --target aarch64-apple-darwin
+          cargo build --release --target x86_64-apple-darwin
+
+      - name: Create universal binary
+        run: |
+          mkdir -p dist
+          lipo -create \
+            target/aarch64-apple-darwin/release/schl8 \
+            target/x86_64-apple-darwin/release/schl8 \
+            -output dist/schl8-universal
+          lipo -info dist/schl8-universal
+
+      - name: Build Schl8.app
+        run: SCHL8_BIN=dist/schl8-universal ./scripts/bundle.sh
+
+      - name: Report what was built
+        run: |
+          version=$(grep '^version' Cargo.toml | head -1 | cut -d'"' -f2)
+          echo "### Test build" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Cargo.toml version: \`$version\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Commit: \`${GITHUB_SHA:0:8}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Architectures: \`$(lipo -archs dist/schl8-universal)\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Unsigned and un-notarized: clear quarantine after unzipping with" >> "$GITHUB_STEP_SUMMARY"
+          echo '`xattr -dr com.apple.quarantine Schl8.app`' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Zip app bundle
+        run: ditto -c -k --keepParent dist/Schl8.app Schl8-${{ inputs.label }}.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Schl8-${{ inputs.label }}
+          path: Schl8-${{ inputs.label }}.zip
+          retention-days: 7

@@ -1,0 +1,872 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Schl8 — secure encrypted notes for macOS (GPG &amp; AGE)</title>
+<meta name="description" content="Schl8 is a secure, open-source macOS viewer and editor for encrypted text and markdown files. Encrypt with GPG (hardware security key supported — YubiKey tested) or a 12-word seed phrase via AGE. Global hotkeys capture notes into redundantly encrypted files, and a write-only CLI lets AI agents store output encrypted without ever reading a note.">
+<link rel="icon" href="icon.png">
+<style>
+  :root {
+    --bg: #0d1117;
+    --bg-raised: #151b26;
+    --bg-card: #131a24;
+    --border: #263041;
+    --text: #c7d2e0;
+    --text-dim: #7d8a9c;
+    --text-strong: #e8eef5;
+    --cyan: #4dd8e6;
+    --violet: #9a6bff;
+    --amber: #e6b84d;
+    --grad: linear-gradient(100deg, var(--cyan), var(--violet));
+    --mono: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 0 24px; }
+  a { color: var(--cyan); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  /* ── Hero ─────────────────────────────────────────── */
+  header {
+    padding: 88px 0 64px;
+    text-align: center;
+    background:
+      radial-gradient(ellipse 60% 45% at 50% -5%, rgba(77,216,230,.13), transparent),
+      radial-gradient(ellipse 55% 40% at 65% 8%, rgba(154,107,255,.10), transparent);
+    border-bottom: 1px solid var(--border);
+  }
+  header img.logo {
+    width: 108px; height: 108px;
+    border-radius: 24px;
+    box-shadow: 0 12px 48px rgba(77,216,230,.22), 0 4px 20px rgba(154,107,255,.18);
+  }
+  h1 {
+    margin-top: 26px;
+    font-size: 52px; font-weight: 800; letter-spacing: -1px;
+    background: var(--grad);
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent; color: transparent;
+  }
+  .acronym {
+    margin-top: 6px;
+    font-size: 12.5px; font-weight: 600;
+    letter-spacing: 1.6px; text-transform: uppercase;
+    color: var(--text-dim);
+  }
+  .tagline {
+    margin: 14px auto 0; max-width: 620px;
+    font-size: 20px; color: var(--text-strong);
+  }
+  .sub { margin: 10px auto 0; max-width: 650px; color: var(--text-dim); font-size: 15.5px; }
+  .cta { margin-top: 36px; display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+  .btn {
+    display: inline-block; padding: 13px 26px; border-radius: 12px;
+    font-weight: 600; font-size: 16px;
+  }
+  .btn-primary { background: var(--grad); color: #0b0e14; }
+  .btn-primary:hover { text-decoration: none; filter: brightness(1.1); }
+  .btn-ghost { border: 1px solid var(--border); color: var(--text-strong); background: var(--bg-raised); }
+  .btn-ghost:hover { text-decoration: none; border-color: var(--cyan); }
+  .cta-note { margin-top: 14px; font-size: 13px; color: var(--text-dim); }
+  .cta-note code { font-family: var(--mono); color: var(--cyan); }
+
+  /* ── Sections ─────────────────────────────────────── */
+  section { padding: 64px 0; border-bottom: 1px solid var(--border); }
+  h2 {
+    font-size: 26px; font-weight: 700; color: var(--text-strong);
+    letter-spacing: -.3px; margin-bottom: 8px;
+  }
+  h2::after {
+    content: ""; display: block; width: 56px; height: 3px;
+    margin-top: 10px; border-radius: 2px; background: var(--grad);
+  }
+  .lede { color: var(--text-dim); margin: 16px 0 8px; max-width: 720px; }
+  .lede strong { color: var(--text-strong); }
+
+  /* Warning */
+  .warning {
+    margin-top: 22px; padding: 20px 22px;
+    background: rgba(230,184,77,.06);
+    border: 1px solid rgba(230,184,77,.35);
+    border-left: 4px solid var(--amber);
+    border-radius: 10px;
+  }
+  .warning strong { color: var(--amber); }
+  .warning p { margin-top: 8px; font-size: 15px; }
+  .warning p:first-child { margin-top: 0; }
+
+  /* Feature grid */
+  .grid {
+    margin-top: 28px;
+    display: grid; gap: 16px;
+    grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
+  }
+  .card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px;
+  }
+  .card:hover { border-color: rgba(77,216,230,.4); }
+  .card .icon { font-size: 22px; }
+  .card h3 { margin-top: 8px; font-size: 16.5px; color: var(--text-strong); }
+  .card h3 .pill { font-size: 11px; font-weight: 600; vertical-align: middle; margin-left: 8px;
+    padding: 2px 8px; border-radius: 20px; border: 1px solid var(--border); color: var(--text-dim); }
+  .card p { margin-top: 6px; font-size: 14.5px; color: var(--text-dim); }
+  .card ul { list-style: none; margin-top: 10px; }
+  .card li { font-size: 14px; color: var(--text-dim); padding: 4px 0 4px 18px; position: relative; }
+  .card li::before { content: "–"; position: absolute; left: 2px; color: var(--cyan); }
+  .card li b { color: var(--text); font-weight: 600; }
+
+  /* Patterns */
+  .pattern { margin-top: 52px; }
+  .pattern:first-of-type { margin-top: 34px; }
+  .pattern h3 {
+    font-size: 19px; color: var(--text-strong); letter-spacing: -.2px;
+  }
+  .pattern h3 .n {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 30px; height: 30px; margin-right: 12px; border-radius: 9px;
+    background: var(--bg-raised); border: 1px solid var(--border);
+    color: var(--cyan); font-size: 14px; vertical-align: middle;
+  }
+  .pattern > p { margin-top: 10px; max-width: 720px; color: var(--text-dim); font-size: 15px; }
+
+  /* Diagrams (hand-authored SVG: no runtime, themes with the palette) */
+  .diagram { margin-top: 22px; overflow-x: auto; }
+  .diagram svg { display: block; min-width: 680px; width: 100%; height: auto; }
+  .diagram .n-fill { fill: var(--bg-card); }
+  .diagram .n-line { stroke: var(--border); }
+  .diagram .n-accent { stroke: var(--cyan); }
+  .diagram .n-warn { stroke: rgba(230,184,77,.6); }
+  .diagram .t-strong { fill: var(--text-strong); font: 600 15px -apple-system, BlinkMacSystemFont, sans-serif; }
+  .diagram .t-dim { fill: var(--text-dim); font: 13px -apple-system, BlinkMacSystemFont, sans-serif; }
+  .diagram .t-mono { fill: var(--cyan); font: 12px var(--mono); }
+  .diagram .t-warn { fill: var(--amber); font: 13px -apple-system, BlinkMacSystemFont, sans-serif; }
+  .diagram .flow { stroke: var(--cyan); stroke-width: 2; fill: none; }
+  .diagram .flow-dash { stroke: var(--violet); stroke-width: 2; fill: none; stroke-dasharray: 6 5; }
+  .diagram .no { stroke: var(--amber); stroke-width: 2; fill: none; }
+  .diagram figcaption { margin-top: 10px; font-size: 13px; color: var(--text-dim); max-width: 720px; }
+
+  /* Code blocks */
+  pre {
+    margin-top: 14px; padding: 16px 18px; overflow-x: auto;
+    background: #0a0e14; border: 1px solid var(--border); border-radius: 10px;
+    font-family: var(--mono); font-size: 13.5px; line-height: 1.7;
+    color: var(--text);
+  }
+  pre .c { color: var(--text-dim); }
+  pre .k { color: var(--cyan); }
+  code.inline { font-family: var(--mono); font-size: .92em; color: var(--cyan); background: var(--bg-raised); padding: 1px 6px; border-radius: 5px; }
+
+  /* Steps */
+  ol.steps { margin: 18px 0 0 0; padding-left: 0; list-style: none; counter-reset: step; }
+  ol.steps li {
+    counter-increment: step; position: relative;
+    padding: 0 0 18px 52px;
+  }
+  ol.steps li::before {
+    content: counter(step);
+    position: absolute; left: 0; top: 0;
+    width: 34px; height: 34px; border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--bg-raised); border: 1px solid var(--border);
+    color: var(--cyan); font-weight: 700; font-size: 15px;
+  }
+  ol.steps h4 { font-size: 15.5px; color: var(--text-strong); padding-top: 5px; }
+  ol.steps p { font-size: 14.5px; color: var(--text-dim); margin-top: 4px; }
+
+  /* Security lists */
+  .cols { display: grid; gap: 24px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); margin-top: 24px; }
+  .seclist h3 { font-size: 16px; color: var(--text-strong); margin-bottom: 10px; }
+  .seclist ul { list-style: none; }
+  .seclist li { padding: 5px 0 5px 26px; position: relative; font-size: 14.5px; }
+  .seclist.yes li::before { content: "✓"; position: absolute; left: 2px; color: var(--cyan); font-weight: 700; }
+  .seclist.no li::before { content: "✗"; position: absolute; left: 2px; color: var(--amber); font-weight: 700; }
+  .seclist.no li { color: var(--text-dim); }
+
+  footer { padding: 44px 0 56px; text-align: center; color: var(--text-dim); font-size: 14px; }
+  footer .links { margin-bottom: 10px; display: flex; gap: 22px; justify-content: center; flex-wrap: wrap; }
+
+  @media (max-width: 560px) {
+    h1 { font-size: 40px; }
+    header { padding: 60px 0 48px; }
+    section { padding: 48px 0; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <img class="logo" src="icon.png" alt="Schl8 app icon" width="108" height="108">
+    <h1>Schl8</h1>
+    <p class="acronym">Schuyler's Lightweight Armored Text Editor</p>
+    <p class="tagline">A secure, native macOS home for your encrypted notes.</p>
+    <p class="sub">View, edit, and re-encrypt <code class="inline">.gpg</code> and <code class="inline">.age</code> text &amp; markdown files —
+       with GPG + hardware security keys or a 12-word seed phrase, mlock'd memory, and a hard rule that plaintext never
+       touches disk. Global hotkeys capture notes from anywhere; a write-only CLI lets AI agents add to your
+       notes without ever reading them.</p>
+    <div class="cta">
+      <a class="btn btn-primary" href="https://github.com/schbz/schl8/releases/latest">⬇&nbsp; Download for macOS</a>
+      <a class="btn btn-ghost" href="https://github.com/schbz/schl8">View source on GitHub</a>
+    </div>
+    <p class="cta-note">Universal binary · Apple&nbsp;Silicon&nbsp;+&nbsp;Intel · free &amp; open source (MIT) · or <code>brew install schbz/tap/schl8</code></p>
+  </div>
+</header>
+
+<section id="warning">
+  <div class="wrap">
+    <h2>Read this first</h2>
+    <div class="warning">
+      <p><strong>Schl8 is experimental software with no independent security audit.</strong></p>
+      <p>It is built carefully — locked memory, zeroization, compile-time trait guarantees, a documented
+         threat model — but "built carefully" is not "professionally verified." Never let a
+         Schl8-managed file be the only copy of something important, and don't rely on it to protect
+         data whose exposure would seriously harm you.</p>
+      <p>Its second life is as a <em>worked example</em>: a small, readable Rust codebase showing how to
+         build a security-conscious desktop app. If your threat model is serious, read the source, take
+         the ideas, and build or audit your own.</p>
+    </div>
+  </div>
+</section>
+
+<section id="learn">
+  <div class="wrap">
+    <h2>Why this exists</h2>
+    <p class="lede">I built Schl8 for myself: I wanted a private place for my own notes, and a real
+      project for learning how a native macOS app fits together. It became something I use every day,
+      so I'm sharing it.</p>
+    <p class="lede">It's a personal tool and an open codebase, not a commercial product. If you want to
+      know how any of it works, the
+      <a href="https://github.com/schbz/schl8#readme">README</a> is the place
+      to start, and the
+      <a href="https://github.com/schbz/schl8/blob/master/TECHNICAL-CRITIQUE.md">technical self-critique</a>
+      keeps an honest list of what could be better.</p>
+  </div>
+</section>
+
+<section id="capture">
+  <div class="wrap">
+    <h2>Press a key, keep a secret</h2>
+    <p class="lede">The fastest way to lose a thought is to open an app, find the right file, and find
+       the right place in it. Schl8 removes those steps. It lives in the menu bar, and every registered
+       note has its own system-wide hotkey: press it in any application, type, hit Enter. The window is
+       gone in two seconds and the text is already encrypted.</p>
+    <p class="lede">Different kinds of information go to different notes — a daily journal, an inbox to
+       sort later, an ideas file, a work log, one note per project. You can register up to 25, each with
+       its own hotkey, which pairs well with a programmable keypad: one physical button per destination.</p>
+
+    <figure class="diagram">
+      <svg viewBox="0 0 1000 220" role="img" aria-label="Three global hotkeys open the jot window preselected on journal, inbox, or ideas; each entry lands in its own encrypted file.">
+        <defs>
+          <marker id="arc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--cyan)"/>
+          </marker>
+        </defs>
+
+        <rect class="n-fill n-line" x="6" y="10" width="180" height="50" rx="10" stroke-width="1"/>
+        <text class="t-mono" x="96" y="32" text-anchor="middle">⌃⌘1</text>
+        <text class="t-dim" x="96" y="50" text-anchor="middle">journal</text>
+        <rect class="n-fill n-line" x="6" y="80" width="180" height="50" rx="10" stroke-width="1"/>
+        <text class="t-mono" x="96" y="102" text-anchor="middle">⌃⌘2</text>
+        <text class="t-dim" x="96" y="120" text-anchor="middle">inbox</text>
+        <rect class="n-fill n-line" x="6" y="150" width="180" height="50" rx="10" stroke-width="1"/>
+        <text class="t-mono" x="96" y="172" text-anchor="middle">⌃⌘3</text>
+        <text class="t-dim" x="96" y="190" text-anchor="middle">ideas · works from any app</text>
+
+        <path class="flow" d="M192,35 L232,35 L232,105 L266,105" marker-end="url(#arc)"/>
+        <path class="flow" d="M192,105 L266,105"/>
+        <path class="flow" d="M192,175 L232,175 L232,105 L266,105"/>
+
+        <rect class="n-fill n-accent" x="272" y="69" width="220" height="72" rx="10" stroke-width="1.5"/>
+        <text class="t-strong" x="382" y="97" text-anchor="middle">Jot window</text>
+        <text class="t-dim" x="382" y="119" text-anchor="middle">type · Enter · gone in 2s</text>
+
+        <path class="flow" d="M498,85 L536,85 L536,35 L568,35" marker-end="url(#arc)"/>
+        <path class="flow" d="M498,105 L568,105" marker-end="url(#arc)"/>
+        <path class="flow" d="M498,125 L536,125 L536,175 L568,175" marker-end="url(#arc)"/>
+
+        <rect class="n-fill n-line" x="574" y="10" width="210" height="50" rx="10" stroke-width="1"/>
+        <text class="t-mono" x="679" y="40" text-anchor="middle">journal.md.age</text>
+        <rect class="n-fill n-line" x="574" y="80" width="210" height="50" rx="10" stroke-width="1"/>
+        <text class="t-mono" x="679" y="110" text-anchor="middle">inbox.md.age</text>
+        <rect class="n-fill n-line" x="574" y="150" width="210" height="50" rx="10" stroke-width="1"/>
+        <text class="t-mono" x="679" y="180" text-anchor="middle">ideas.md.gpg</text>
+
+        <text class="t-dim" x="890" y="40" text-anchor="middle">re-encrypted</text>
+        <text class="t-dim" x="890" y="58" text-anchor="middle">on every entry</text>
+        <text class="t-dim" x="890" y="110" text-anchor="middle">each note can</text>
+        <text class="t-dim" x="890" y="128" text-anchor="middle">fan out to</text>
+        <text class="t-dim" x="890" y="146" text-anchor="middle">backup keys too</text>
+      </svg>
+      <figcaption>Locked at the time? The entry is encrypted immediately and queued; it merges into the
+        note the next time you unlock. Nothing waits around in plaintext.</figcaption>
+    </figure>
+
+    <p class="lede">Redundancy is part of the same motion. Each note can encrypt to several keys, and each
+       key can write to several destinations — so one capture lands in your working copy, on a second
+       disk, and in a cloud-synced folder in the same keystroke, every copy encrypted. A post-save hook
+       can commit or sync the files automatically. Set it up once in <em>Quick Note Files…</em> and
+       <em>Save Options…</em>; after that it's just the hotkey.</p>
+  </div>
+</section>
+
+<section id="features">
+  <div class="wrap">
+    <h2>Features</h2>
+    <div class="grid">
+      <div class="card"><span class="icon">🔐</span><h3>GPG + hardware keys</h3>
+        <p>Decrypts via your system GnuPG and gpg-agent — passphrase or hardware-key PIN, exactly the trust chain you already use. Hardware MFA / security keys work through gpg's smart-card support; YubiKey is the only one tested so far.</p></div>
+      <div class="card"><span class="icon">🔑</span><h3>Seed-phrase AGE keys</h3>
+        <p>No GnuPG? Encrypt with <a href="https://age-encryption.org">AGE</a> using an X25519 identity derived from a 12-word BIP-39 seed phrase. The private key is rebuilt on unlock, held only in locked memory, and never written to disk — Schl8 runs fully AGE-only when gpg isn't installed.</p></div>
+      <div class="card"><span class="icon">🧠</span><h3>Plaintext only in RAM</h3>
+        <p>Decrypted content flows from GPG (or AGE) straight into mlock'd, zeroize-on-drop buffers. No temp files, no swap, no clipboard by default, core dumps disabled.</p></div>
+      <div class="card"><span class="icon">📝</span><h3>Markdown &amp; editing</h3>
+        <p>Styled rendering for encrypted markdown, full-window in-place editing, and saving that always re-encrypts — Schl8 cannot write plaintext.</p></div>
+      <div class="card"><span class="icon">⚡</span><h3>Quick Notes</h3>
+        <p>A global hotkey summons a small jot window from anywhere: type, hit Enter, and the note is appended to an encrypted file and re-encrypted. Register up to 25 note files, each with its own hotkey — perfect for keypad macros.</p></div>
+      <div class="card"><span class="icon">🤖</span><h3>Agent-ready, write-only</h3>
+        <p>A headless CLI lets Claude Code, Codex, and scripts store their output encrypted — using only your public keys. Agents can add to your notes but can never read them, unlock anything, or touch a secret.</p></div>
+      <div class="card"><span class="icon">🎯</span><h3>Multi-key save plans</h3>
+        <p>Per-file plans encrypt every save to one or more keys, each written to one or more destinations — a working copy plus backups in one keystroke, with optional post-save shell hooks.</p></div>
+      <div class="card"><span class="icon">📦</span><h3>Encrypted folders</h3>
+        <p>Open a <code class="inline">folder.tar.gz.gpg</code> archive and browse every text file inside from a sidebar tree — extracted entirely in memory, with decompression-bomb limits.</p></div>
+      <div class="card"><span class="icon">⏱</span><h3>Auto-lock, with a stash</h3>
+        <p>Idle timeout, display sleep, or screen lock closes the document and zeroizes buffers — and unsaved edits are first encrypted to the document's own key, so locking never costs you work.</p></div>
+      <div class="card"><span class="icon">🎨</span><h3>Native &amp; configurable</h3>
+        <p>Menu-bar residency, Finder "Open With", theme presets, rebindable shortcuts, a focus mode, an animated crawl-reading mode, and vim-style navigation on qwerty/dvorak/colemak/workman.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="backends">
+  <div class="wrap">
+    <h2>Two ways to encrypt</h2>
+    <p class="lede">Every note is encrypted to a recipient key. Schl8 speaks two backends — pick per file, or
+       mix both in one save plan (e.g. a GPG working copy plus an AGE backup). You never have to choose
+       one forever.</p>
+    <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));">
+      <div class="card">
+        <span class="icon">🔐</span><h3>GPG <span class="pill">mature standard</span></h3>
+        <p>The OpenPGP path, through your existing GnuPG install and gpg-agent.</p>
+        <ul>
+          <li><b>Standard &amp; battle-tested</b> — decades-old format, many implementations, widely audited.</li>
+          <li><b>Uses your keyring</b> — the same keys, agent, and trust you already have.</li>
+          <li><b>Hardware security keys</b> — smart-card PIN entry via gpg-agent. YubiKey is the only device tested so far.</li>
+          <li><b>Needs GnuPG</b> — requires <code class="inline">gnupg</code> (and <code class="inline">pinentry-mac</code> for GUI prompts) installed.</li>
+          <li>Best if you already live in GPG or want an audited standard.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <span class="icon">🔑</span><h3>AGE <span class="pill">seed phrase</span></h3>
+        <p>A modern format (X25519 + ChaCha20-Poly1305) driven by a 12-word phrase — no keyring, no GnuPG.</p>
+        <ul>
+          <li><b>Nothing to install</b> — works with zero external dependencies; the whole point when gpg/pinentry aren't available.</li>
+          <li><b>A phrase, not a keyfile</b> — your identity is derived from a 12-word BIP-39 seed phrase you can memorize or write down. An optional 25th-word passphrase is supported.</li>
+          <li><b>Key lives only in RAM</b> — the private key is rebuilt on unlock into locked memory and never touches disk. Close Schl8 (or “Forget”) and it's gone until you re-enter the phrase.</li>
+          <li><b>Import public recipients</b> — paste an <code class="inline">age1…</code> key to encrypt notes for someone else.</li>
+          <li>Best if you want a portable, dependency-free key you carry in your head.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="warning" style="margin-top:26px">
+      <p><strong>About the AGE seed-phrase path — read before you rely on it.</strong></p>
+      <p>The AGE backend is newer than the GPG path, and the way Schl8 turns your 12-word phrase into an AGE
+         key is a <em>Schl8-specific</em> derivation (documented and frozen as v1 in
+         <a href="https://github.com/schbz/schl8/blob/master/docs/AGE-DESIGN.md">AGE-DESIGN.md</a>). The
+         underlying primitives are standard; the exact composition has not been independently audited.</p>
+      <p><strong>Your seed phrase <em>is</em> your key.</strong> Schl8 never writes the phrase or the derived
+         key to disk, so if you lose it, every note encrypted to it is unrecoverable — there is no reset. Write it
+         down and store it offline: on paper in a safe, or on a hardware MFA / security key that can emit static
+         text (a YubiKey static-password slot is the only device tested for this so far). Treat those 12 words
+         like the master key they are.</p>
+    </div>
+
+    <figure class="diagram">
+      <svg viewBox="0 0 1000 210" role="img" aria-label="Flow: a note jotted while locked is encrypted to your public key, held as a pending segment, then merged into the note after you unlock.">
+        <defs>
+          <marker id="ar1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--cyan)"/>
+          </marker>
+          <marker id="ar1v" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--violet)"/>
+          </marker>
+        </defs>
+
+        <rect class="n-fill n-line" x="6" y="30" width="180" height="72" rx="10" stroke-width="1"/>
+        <text class="t-strong" x="96" y="60" text-anchor="middle">You jot a note</text>
+        <text class="t-dim" x="96" y="80" text-anchor="middle">identity locked</text>
+
+        <line class="flow" x1="192" y1="66" x2="222" y2="66" marker-end="url(#ar1)"/>
+
+        <rect class="n-fill n-accent" x="228" y="30" width="210" height="72" rx="10" stroke-width="1.5"/>
+        <text class="t-strong" x="333" y="60" text-anchor="middle">Encrypt to your key</text>
+        <text class="t-dim" x="333" y="80" text-anchor="middle">public key only — no secret</text>
+
+        <line class="flow" x1="444" y1="66" x2="474" y2="66" marker-end="url(#ar1)"/>
+
+        <rect class="n-fill n-line" x="480" y="30" width="210" height="72" rx="10" stroke-width="1"/>
+        <text class="t-strong" x="585" y="58" text-anchor="middle">Pending segment</text>
+        <text class="t-mono" x="585" y="80" text-anchor="middle">.note.age.spool/</text>
+
+        <line class="flow-dash" x1="696" y1="66" x2="742" y2="66" marker-end="url(#ar1v)"/>
+        <text class="t-dim" x="719" y="26" text-anchor="middle">later</text>
+
+        <rect class="n-fill n-accent" x="748" y="30" width="180" height="72" rx="10" stroke-width="1.5"/>
+        <text class="t-strong" x="838" y="60" text-anchor="middle">You unlock</text>
+        <text class="t-dim" x="838" y="80" text-anchor="middle">seed phrase</text>
+
+        <path class="flow" d="M838,108 L838,140 L500,140 L500,166" marker-end="url(#ar1)"/>
+
+        <rect class="n-fill n-line" x="360" y="172" width="280" height="34" rx="10" stroke-width="1"/>
+        <text class="t-strong" x="500" y="195" text-anchor="middle">Merged into your note, in order</text>
+      </svg>
+      <figcaption>Writing while locked. Encryption never needs your private key, so the entry is
+        sealed immediately and waits beside the note; only merging requires you.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section id="security">
+  <div class="wrap">
+    <h2>Security model</h2>
+    <p class="lede">Schl8 minimizes the exposure window of decrypted plaintext — and is explicit about what it can't defend against.</p>
+    <div class="cols">
+      <div class="seclist yes">
+        <h3>Designed to protect against</h3>
+        <ul>
+          <li>Plaintext ever being written to disk</li>
+          <li>Seed-phrase AGE keys touching disk (derived on unlock, held only in mlock'd RAM)</li>
+          <li>Secrets swapped out of RAM (mlock'd buffers)</li>
+          <li>Data lingering after close (volatile-write zeroization)</li>
+          <li>Accidental clipboard leaks (copy is opt-in with a warning)</li>
+          <li>Core-dump exposure (RLIMIT_CORE = 0)</li>
+          <li>PATH-planted fake gpg binaries (absolute-path allow-list)</li>
+          <li>Torn or half-written saves (atomic, fsync'd, owner-only writes)</li>
+          <li>Archive decompression bombs (hard extraction caps)</li>
+          <li>Accidental Clone/Debug leaks of secret buffers (compile-time trait locks)</li>
+        </ul>
+      </div>
+      <div class="seclist no">
+        <h3>Explicitly out of scope</h3>
+        <ul>
+          <li>Root or kernel-level memory inspection</li>
+          <li>A compromised gpg, gpg-agent, or pinentry</li>
+          <li>A lost seed phrase — there's no recovery; Schl8 never stores it</li>
+          <li>Independent audit of the custom seed-phrase → AGE derivation</li>
+          <li>Hardware keyloggers and screen capture</li>
+          <li>Transient plaintext inside the gpg subprocess pipe</li>
+          <li>Stale copies after an edit outgrows its reserved buffer</li>
+          <li>egui's single-frame text-change bookkeeping copy</li>
+        </ul>
+      </div>
+    </div>
+    <p class="lede" style="margin-top:24px">Full details in the
+      <a href="https://github.com/schbz/schl8#security-model">README security model</a> and
+      <a href="https://github.com/schbz/schl8/blob/master/SECURITY.md">SECURITY.md</a>.</p>
+  </div>
+</section>
+
+<section id="install">
+  <div class="wrap">
+    <h2>Install</h2>
+    <p class="lede">Grab the app, or build it from source you've read — the second option is the point for the security-minded.</p>
+
+    <ol class="steps">
+      <li>
+        <h4>Install GnuPG — optional, only for the GPG backend</h4>
+        <pre>brew install gnupg pinentry-mac</pre>
+        <p>Skip this if you'll use the AGE seed-phrase backend: with no gpg installed, Schl8 runs AGE-only
+           and everything still works. Install it for GPG keys and hardware security keys (YubiKey tested).</p>
+      </li>
+      <li>
+        <h4>Download &amp; install Schl8</h4>
+        <p>Get <code class="inline">Schl8-vX.Y.Z-macos-universal.zip</code> from the
+           <a href="https://github.com/schbz/schl8/releases/latest">latest release</a>, unzip, and drag
+           <code class="inline">Schl8.app</code> into Applications.</p>
+      </li>
+      <li>
+        <h4>Clear the quarantine flag</h4>
+        <p>Schl8 is open source but not notarized with Apple, so macOS blocks the downloaded copy until you run:</p>
+        <pre>xattr -dr com.apple.quarantine /Applications/Schl8.app</pre>
+        <p>Only do this if you're comfortable running un-notarized software. The alternative:</p>
+      </li>
+      <li>
+        <h4>…or build it yourself</h4>
+        <pre><span class="c"># requires Rust 1.75+</span>
+git clone https://github.com/schbz/schl8.git
+cd schl8
+<span class="c"># read the code — that's the point</span>
+./scripts/bundle.sh --install</pre>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<section id="agents">
+  <div class="wrap">
+    <h2>Built for agents — without trusting them</h2>
+    <p class="lede">AI agents produce a lot of text worth keeping, and most of it lands in plaintext:
+       scratch files, chat logs, sync folders. Schl8 gives agents a better place to put it.
+       The integration is one sentence: <strong>agents write into your encrypted store, and they never
+       read from it.</strong> Encrypting to your public key needs no secret, so the agent surface holds
+       zero key material — and there is no decrypt command for anything to misuse.</p>
+
+    <figure class="diagram">
+      <svg viewBox="0 0 1000 200" role="img" aria-label="Flow: an agent encrypts output to your public key and it lands as ciphertext; only you can decrypt. The reverse path from your notes back to the agent is blocked.">
+        <defs>
+          <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--cyan)"/>
+          </marker>
+        </defs>
+
+        <rect class="n-fill n-line" x="6" y="24" width="180" height="72" rx="10" stroke-width="1"/>
+        <text class="t-strong" x="96" y="54" text-anchor="middle">Agent output</text>
+        <text class="t-dim" x="96" y="74" text-anchor="middle">report, summary, log</text>
+
+        <line class="flow" x1="192" y1="60" x2="222" y2="60" marker-end="url(#ar2)"/>
+
+        <rect class="n-fill n-accent" x="228" y="24" width="230" height="72" rx="10" stroke-width="1.5"/>
+        <text class="t-mono" x="343" y="52" text-anchor="middle">schl8 encrypt / append</text>
+        <text class="t-dim" x="343" y="74" text-anchor="middle">holds no key material</text>
+
+        <line class="flow" x1="464" y1="60" x2="494" y2="60" marker-end="url(#ar2)"/>
+
+        <rect class="n-fill n-line" x="500" y="24" width="200" height="72" rx="10" stroke-width="1"/>
+        <text class="t-strong" x="600" y="54" text-anchor="middle">Ciphertext</text>
+        <text class="t-dim" x="600" y="74" text-anchor="middle">file or pending entry</text>
+
+        <line class="flow" x1="706" y1="60" x2="736" y2="60" marker-end="url(#ar2)"/>
+
+        <rect class="n-fill n-accent" x="742" y="24" width="200" height="72" rx="10" stroke-width="1.5"/>
+        <text class="t-strong" x="842" y="54" text-anchor="middle">You unlock + merge</text>
+        <text class="t-dim" x="842" y="74" text-anchor="middle">the only way in</text>
+
+        <path class="no" d="M842,104 L842,150 L96,150 L96,110"/>
+        <line class="no" x1="452" y1="136" x2="482" y2="164"/>
+        <line class="no" x1="482" y1="136" x2="452" y2="164"/>
+        <text class="t-dim" x="467" y="184" text-anchor="middle">agents can never read back</text>
+      </svg>
+      <figcaption>The agent surface is one-way. Encryption is public, decryption is yours — so a
+        confused or compromised agent can add to your notes, never open them.</figcaption>
+    </figure>
+
+    <div class="cols">
+      <div class="seclist yes">
+        <h3>What an agent can do</h3>
+        <ul>
+          <li>Encrypt any output to your keys: <code class="inline">report | schl8 encrypt --to age1… --out report.md.age</code></li>
+          <li>Append to a quick-note — <code class="inline">schl8 append --note journal</code> — via the offline spool; it merges when <em>you</em> unlock</li>
+          <li>Discover where it may write: <code class="inline">schl8 notes list --json</code>, <code class="inline">schl8 recipients list --json</code></li>
+          <li>Check what's waiting: <code class="inline">schl8 pending --json</code></li>
+          <li>Trigger your post-save hooks (backup, sync, git) — hooks receive paths, never content</li>
+        </ul>
+      </div>
+      <div class="seclist no">
+        <h3>What an agent cannot do</h3>
+        <ul>
+          <li>Decrypt or read any note — there is no headless decrypt, by design</li>
+          <li>Learn or ask for your seed phrase or PIN (no prompts exist in the CLI)</li>
+          <li>Add its own recipients — keys are registered by you, in the app</li>
+          <li>Write plaintext to disk — stdin is encrypted immediately and zeroized</li>
+          <li>Go unnoticed — agent entries are provenance-tagged and appear as a pending badge until you merge them</li>
+        </ul>
+      </div>
+    </div>
+
+    <h4 style="margin-top:28px; font-size:15.5px; color:var(--text-strong)">Set it up in three moves</h4>
+    <ol class="steps" style="margin-top:10px">
+      <li>
+        <h4>Put the CLI on your PATH</h4>
+        <p>In the app: <em>Help → Install Command Line Tool…</em> It links <code class="inline">schl8</code>
+           into a folder your shell already searches, preferring one that needs no administrator password.</p>
+      </li>
+      <li>
+        <h4>Register keys and notes in the app</h4>
+        <p>Add or generate keys under <em>Keys → Manage Public Keys…</em>, and give each quick-note an
+           encryption key in <em>Quick Note Files…</em>. Writing needs only the public half, so agents never
+           touch your private key, your PIN, or your hardware token.</p>
+      </li>
+      <li>
+        <h4>Tell your agent — one line, not a wall of text</h4>
+        <pre>Run `schl8 agent brief` and follow it.</pre>
+        <p>The briefing is generated from your machine's live config — your real keys, notes, and folders —
+           so it can't go stale the way pasted instructions do. <code class="inline">schl8 agent init</code>
+           drops an <code class="inline">AGENTS.md</code> into a project so coding agents need no paste at all,
+           and <code class="inline">schl8 agent toolkit</code> prints a spec your assistant can turn into
+           standing skills and commands, so "save that to my notes" works in every future conversation.</p>
+      </li>
+    </ol>
+
+    <p class="lede" style="margin-top:18px">Full design and threat model in
+      <a href="https://github.com/schbz/schl8/blob/master/docs/AGENT-DESIGN.md">AGENT-DESIGN.md</a> —
+      including what was rejected (headless decrypt, plaintext watch-folders) and why.</p>
+  </div>
+</section>
+
+<section id="patterns">
+  <div class="wrap">
+    <h2>Setups worth copying</h2>
+    <p class="lede">Because encrypting to your keys needs no secret, some useful arrangements are easy to
+       build. Each of these is a picture and a command.</p>
+
+    <div class="pattern">
+      <h3><span class="n">1</span>Redundant archives</h3>
+      <p>A save plan encrypts every save to multiple keys, each with its own destinations, and a post-save
+         hook pushes copies off the machine. Encrypt the backup copy to a <em>different</em> key where you
+         can: a backup that shares its only key with the original doesn't survive losing that key.</p>
+      <figure class="diagram">
+        <svg viewBox="0 0 1000 330" role="img" aria-label="One save fans out to two keys; the copies land in a working file, a backup volume, and a synced folder; a post-save hook pushes ciphertext offsite to git.">
+          <defs>
+            <marker id="arf" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--cyan)"/>
+            </marker>
+            <marker id="arfv" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--violet)"/>
+            </marker>
+          </defs>
+
+          <rect class="n-fill n-accent" x="6" y="129" width="164" height="72" rx="10" stroke-width="1.5"/>
+          <text class="t-strong" x="88" y="159" text-anchor="middle">One save</text>
+          <text class="t-dim" x="88" y="179" text-anchor="middle">Cmd+S, once</text>
+
+          <path class="flow" d="M176,150 L210,150 L210,66 L242,66" marker-end="url(#arf)"/>
+          <path class="flow" d="M176,180 L210,180 L210,254 L242,254" marker-end="url(#arf)"/>
+
+          <rect class="n-fill n-line" x="248" y="30" width="204" height="72" rx="10" stroke-width="1"/>
+          <text class="t-strong" x="350" y="60" text-anchor="middle">Key A — your GPG key</text>
+          <text class="t-dim" x="350" y="80" text-anchor="middle">on the hardware token</text>
+
+          <rect class="n-fill n-line" x="248" y="218" width="204" height="72" rx="10" stroke-width="1"/>
+          <text class="t-strong" x="350" y="248" text-anchor="middle">Key B — backup AGE key</text>
+          <text class="t-dim" x="350" y="268" text-anchor="middle">seed phrase on paper</text>
+
+          <path class="flow" d="M458,54 L494,54 L494,36 L528,36" marker-end="url(#arf)"/>
+          <path class="flow" d="M458,78 L494,78 L494,146 L528,146" marker-end="url(#arf)"/>
+          <path class="flow" d="M458,254 L494,254 L494,264 L528,264" marker-end="url(#arf)"/>
+
+          <rect class="n-fill n-line" x="534" y="10" width="230" height="52" rx="10" stroke-width="1"/>
+          <text class="t-mono" x="649" y="33" text-anchor="middle">notes/journal.md.gpg</text>
+          <text class="t-dim" x="649" y="51" text-anchor="middle">working copy</text>
+
+          <rect class="n-fill n-line" x="534" y="120" width="230" height="52" rx="10" stroke-width="1"/>
+          <text class="t-mono" x="649" y="143" text-anchor="middle">/Volumes/Backup/…</text>
+          <text class="t-dim" x="649" y="161" text-anchor="middle">second disk</text>
+
+          <rect class="n-fill n-line" x="534" y="238" width="230" height="52" rx="10" stroke-width="1"/>
+          <text class="t-mono" x="649" y="261" text-anchor="middle">~/Sync/notes.md.age</text>
+          <text class="t-dim" x="649" y="279" text-anchor="middle">cloud-synced folder</text>
+
+          <path class="flow-dash" d="M770,146 L810,146" marker-end="url(#arfv)"/>
+          <rect class="n-fill n-line" x="816" y="110" width="178" height="72" rx="10" stroke-width="1"/>
+          <text class="t-strong" x="905" y="140" text-anchor="middle">Post-save hook</text>
+          <text class="t-dim" x="905" y="160" text-anchor="middle">git commit · rsync offsite</text>
+
+          <text class="t-warn" x="500" y="322" text-anchor="middle">hooks and sync only ever see ciphertext — the cloud never holds a key</text>
+        </svg>
+        <figcaption>Two keys, three destinations, one keystroke. A dead disk costs you a copy; a lost
+          key still leaves a readable set, because the other key opens the other copies.</figcaption>
+      </figure>
+    </div>
+
+    <div class="pattern">
+      <h3><span class="n">2</span>Encrypted logs</h3>
+      <p>Build output, cron results, and session summaries usually accumulate in plaintext log files,
+         complete with hostnames and tokens in URLs. Piping them through
+         <code class="inline">append --raw</code> seals each entry as it's produced and queues it beside
+         the note until you unlock.</p>
+      <figure class="diagram">
+        <svg viewBox="0 0 1000 250" role="img" aria-label="Cron jobs, CI runs and agent sessions pipe into schl8 append; entries queue as ciphertext and merge into the encrypted log when you unlock. Plaintext log files are crossed out.">
+          <defs>
+            <marker id="arl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--cyan)"/>
+            </marker>
+            <marker id="arlv" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--violet)"/>
+            </marker>
+          </defs>
+
+          <rect class="n-fill n-line" x="6" y="10" width="160" height="50" rx="10" stroke-width="1"/>
+          <text class="t-strong" x="86" y="40" text-anchor="middle">cron job</text>
+          <rect class="n-fill n-line" x="6" y="70" width="160" height="50" rx="10" stroke-width="1"/>
+          <text class="t-strong" x="86" y="100" text-anchor="middle">CI / build run</text>
+          <rect class="n-fill n-line" x="6" y="130" width="160" height="50" rx="10" stroke-width="1"/>
+          <text class="t-strong" x="86" y="160" text-anchor="middle">agent session</text>
+
+          <path class="flow" d="M172,35 L206,35 L206,95 L236,95" marker-end="url(#arl)"/>
+          <path class="flow" d="M172,95 L236,95"/>
+          <path class="flow" d="M172,155 L206,155 L206,95 L236,95"/>
+
+          <rect class="n-fill n-accent" x="242" y="59" width="230" height="72" rx="10" stroke-width="1.5"/>
+          <text class="t-mono" x="357" y="87" text-anchor="middle">schl8 append --raw</text>
+          <text class="t-dim" x="357" y="109" text-anchor="middle">sealed on arrival</text>
+
+          <line class="flow" x1="478" y1="95" x2="508" y2="95" marker-end="url(#arl)"/>
+
+          <rect class="n-fill n-line" x="514" y="59" width="210" height="72" rx="10" stroke-width="1"/>
+          <text class="t-strong" x="619" y="87" text-anchor="middle">Encrypted queue</text>
+          <text class="t-dim" x="619" y="109" text-anchor="middle">ciphertext, beside the note</text>
+
+          <path class="flow-dash" d="M730,95 L774,95" marker-end="url(#arlv)"/>
+          <text class="t-dim" x="752" y="82" text-anchor="middle">later</text>
+
+          <rect class="n-fill n-accent" x="780" y="59" width="214" height="72" rx="10" stroke-width="1.5"/>
+          <text class="t-strong" x="887" y="87" text-anchor="middle">You unlock — merged</text>
+          <text class="t-dim" x="887" y="109" text-anchor="middle">provenance-tagged, in order</text>
+
+          <line class="no" x1="330" y1="180" x2="384" y2="216"/>
+          <line class="no" x1="384" y1="180" x2="330" y2="216"/>
+          <text class="t-warn" x="560" y="204" text-anchor="middle">no plaintext log file ever exists — not even briefly</text>
+        </svg>
+        <figcaption>Appending needs no key, so even a cron job on a locked machine can file its
+          report — and nothing readable sits on disk.</figcaption>
+      </figure>
+      <pre><span class="c"># at the end of any script, pipeline, or agent task:</span>
+./deploy.sh 2&gt;&amp;1 | tail -40 | schl8 append --note ops-log --raw</pre>
+    </div>
+
+    <div class="pattern">
+      <h3><span class="n">3</span>Vaults: a working set, sealed as one</h3>
+      <p>Some material is a set, not a document — a research area with sources and open questions, a
+         client with contracts and meeting notes, an incident with a timeline and evidence. Stage it,
+         seal it into one archive, and browse it inside Schl8 with a file tree, extracted entirely
+         in memory.</p>
+      <figure class="diagram">
+        <svg viewBox="0 0 1000 240" role="img" aria-label="A staging directory is tarred and encrypted into one .tar.gz.age file, then browsed in Schl8; the staging directory is deleted immediately.">
+          <defs>
+            <marker id="arv" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--cyan)"/>
+            </marker>
+            <marker id="arw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--amber)"/>
+            </marker>
+          </defs>
+
+          <rect class="n-fill n-warn" x="6" y="30" width="224" height="86" rx="10" stroke-width="1.2"/>
+          <text class="t-strong" x="118" y="56" text-anchor="middle">Staging dir</text>
+          <text class="t-mono" x="118" y="76" text-anchor="middle">/tmp/vault-build/</text>
+          <text class="t-warn" x="118" y="98" text-anchor="middle">plaintext — minutes, not days</text>
+
+          <line class="flow" x1="236" y1="73" x2="268" y2="73" marker-end="url(#arv)"/>
+
+          <rect class="n-fill n-accent" x="274" y="37" width="220" height="72" rx="10" stroke-width="1.5"/>
+          <text class="t-mono" x="384" y="65" text-anchor="middle">tar | schl8 encrypt</text>
+          <text class="t-dim" x="384" y="87" text-anchor="middle">one stream, no temp files</text>
+
+          <line class="flow" x1="500" y1="73" x2="532" y2="73" marker-end="url(#arv)"/>
+
+          <rect class="n-fill n-line" x="538" y="37" width="220" height="72" rx="10" stroke-width="1"/>
+          <text class="t-mono" x="648" y="65" text-anchor="middle">project.tar.gz.age</text>
+          <text class="t-dim" x="648" y="87" text-anchor="middle">one sealed unit</text>
+
+          <line class="flow" x1="764" y1="73" x2="796" y2="73" marker-end="url(#arv)"/>
+
+          <rect class="n-fill n-accent" x="802" y="37" width="192" height="72" rx="10" stroke-width="1.5"/>
+          <text class="t-strong" x="898" y="65" text-anchor="middle">Browse in Schl8</text>
+          <text class="t-dim" x="898" y="87" text-anchor="middle">file tree, edits re-seal</text>
+
+          <path class="no" d="M118,122 L118,160" marker-end="url(#arw)"/>
+          <rect class="n-fill n-warn" x="20" y="166" width="196" height="44" rx="10" stroke-width="1.2"/>
+          <text class="t-mono" x="118" y="193" text-anchor="middle">rm -rf — same breath</text>
+          <text class="t-warn" x="600" y="196" text-anchor="middle">the staging directory is the only plaintext that ever exists, and it's deleted in the same command sequence</text>
+        </svg>
+        <figcaption>Structures that work: <b>research</b> (sources/, notes/, questions.md) ·
+          <b>client</b> (agreement, contacts, meetings/) · <b>incident</b> (timeline, evidence/, postmortem) ·
+          <b>credentials</b> (where recovery codes live — not the codes).</figcaption>
+      </figure>
+    </div>
+
+    <div class="pattern">
+      <h3><span class="n">4</span>The recovery drill</h3>
+      <p>The failure to plan for isn't the missing backup — it's the backup encrypted to a key you no
+         longer hold, which looks identical to a good one until you need it. Verify once, and again after
+         every key change.</p>
+      <figure class="diagram">
+        <svg viewBox="0 0 1000 270" role="img" aria-label="A four-step verification loop: a backup exists, check which keys can open it, test-decrypt a copy, fix what failed, and repeat after any key change.">
+          <defs>
+            <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--cyan)"/>
+            </marker>
+            <marker id="arrv" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--violet)"/>
+            </marker>
+          </defs>
+
+          <rect class="n-fill n-line" x="60" y="20" width="230" height="66" rx="10" stroke-width="1"/>
+          <text class="t-strong" x="175" y="47" text-anchor="middle">A backup exists</text>
+          <text class="t-dim" x="175" y="67" text-anchor="middle">…you believe</text>
+
+          <line class="flow" x1="296" y1="53" x2="654" y2="53" marker-end="url(#arr)"/>
+
+          <rect class="n-fill n-accent" x="660" y="20" width="280" height="66" rx="10" stroke-width="1.5"/>
+          <text class="t-strong" x="800" y="43" text-anchor="middle">Which keys can open it?</text>
+          <text class="t-mono" x="800" y="67" text-anchor="middle">gpg --list-packets --list-only</text>
+
+          <path class="flow" d="M800,92 L800,160" marker-end="url(#arr)"/>
+
+          <rect class="n-fill n-accent" x="660" y="166" width="280" height="66" rx="10" stroke-width="1.5"/>
+          <text class="t-strong" x="800" y="193" text-anchor="middle">Test-decrypt a copy</text>
+          <text class="t-dim" x="800" y="213" text-anchor="middle">the backup, not just the original</text>
+
+          <line class="flow" x1="654" y1="199" x2="296" y2="199" marker-end="url(#arr)"/>
+
+          <rect class="n-fill n-line" x="60" y="166" width="230" height="66" rx="10" stroke-width="1"/>
+          <text class="t-strong" x="175" y="193" text-anchor="middle">Fix it now</text>
+          <text class="t-dim" x="175" y="213" text-anchor="middle">re-encrypt · rotate · replace</text>
+
+          <path class="flow-dash" d="M175,160 L175,92" marker-end="url(#arrv)"/>
+          <text class="t-dim" x="240" y="130" text-anchor="middle">again after</text>
+          <text class="t-dim" x="240" y="148" text-anchor="middle">any key change</text>
+
+          <text class="t-warn" x="475" y="130" text-anchor="middle">a file sealed to a key you lost is</text>
+          <text class="t-warn" x="475" y="150" text-anchor="middle">indistinguishable from a good backup</text>
+
+          <text class="t-dim" x="475" y="258" text-anchor="middle">for AGE: re-derive from the written phrase and confirm the age1… matches your files' recipient</text>
+        </svg>
+        <figcaption>The agent briefing includes this drill — an assistant pointed at
+          <code class="inline">schl8 agent brief</code> can walk you through it.</figcaption>
+      </figure>
+    </div>
+
+    <h3 style="margin-top:56px; font-size:19px; color:var(--text-strong)">More ideas</h3>
+    <div class="grid">
+      <div class="card"><span class="icon">🌙</span><h3>Overnight reports</h3>
+        <p>An agent researches while you sleep and files its findings encrypted. You read them in the
+           morning — nothing sits in a chat log or scratch file.</p></div>
+      <div class="card"><span class="icon">🚨</span><h3>Incident timelines</h3>
+        <p>During an outage, every terminal and responder appends to one encrypted, append-only timeline.
+           Provenance tags show who — or what — wrote each entry.</p></div>
+      <div class="card"><span class="icon">🗺️</span><h3>A credential map</h3>
+        <p>Not the secrets — the map: which password manager, which drawer, which safe-deposit box.
+           That document is sensitive too, and it's the one you want findable in a crisis.</p></div>
+      <div class="card"><span class="icon">📮</span><h3>A one-way drop-box</h3>
+        <p>Register someone else's public key and encrypt to them. Anyone can seal a note only they can
+           open — no accounts, no server, just a file.</p></div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="links">
+      <a href="https://github.com/schbz/schl8">GitHub</a>
+      <a href="https://github.com/schbz/schl8/releases/latest">Releases</a>
+      <a href="https://github.com/schbz/schl8/blob/master/CHANGELOG.md">Changelog</a>
+      <a href="https://github.com/schbz/schl8/blob/master/SECURITY.md">Security</a>
+      <a href="https://github.com/schbz/schl8/blob/master/docs/AGENT-DESIGN.md">Agent design</a>
+      <a href="https://github.com/schbz/schl8/blob/master/LICENSE">MIT License</a>
+    </div>
+    <p>Schl8 — Schuyler's Lightweight Armored Text Editor · © 2026 Schuyler J Sloane</p>
+  </div>
+</footer>
+
+</body>
+</html>

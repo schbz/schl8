@@ -1,0 +1,74 @@
+[package]
+name = "schl8"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.75"
+description = "Schuyler's Lightweight Armored Text Editor — secure macOS-native viewer, editor, and encryptor for GPG-encrypted files"
+license = "MIT"
+keywords = ["gpg", "encryption", "viewer", "macos", "security"]
+categories = ["cryptography"]
+
+[dependencies]
+# GUI framework (immediate-mode — text passed as &str each frame, no retained copies)
+eframe = "0.31"
+egui = "0.31"
+
+# Secure memory
+zeroize = { version = "1", features = ["derive"] }
+
+# Compile-time assertions locking in security-relevant trait properties
+static_assertions = "1"
+
+# Fingerprint (SHA-256) of the opened encrypted file for the status bar
+sha2 = "0.10"
+
+# age encryption backend (seed-phrase identity alternative to GPG).
+age = "0.12"
+bip39 = { version = "2", features = ["rand", "zeroize"] }
+hkdf = "0.12" # digest 0.10, matches sha2 0.10 already in the tree
+bech32 = "0.12"
+getrandom = "0.2" # OS CSPRNG for new-key entropy (already in the tree)
+serde_json = "1" # --json output for the headless agent CLI (already in the tree)
+
+# Markdown parsing
+pulldown-cmark = "0.12"
+
+# In-memory extraction of encrypted folder archives (dir.tar.gz.gpg)
+flate2 = "1"
+tar = "0.4"
+
+# Config file (~/.config/schl8/config.toml)
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+
+# Timestamps for quick-note templates
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+
+# Menu-bar residency and system-wide quick-note hotkey
+tray-icon = "0.19"
+global-hotkey = "0.6"
+
+# Finder "Open With" AppleEvent handling (same versions winit already uses)
+objc2 = "0.5"
+objc2-foundation = { version = "0.2", features = ["NSString"] }
+
+# CLI argument parsing
+clap = { version = "4", features = ["derive"] }
+
+# Native file dialogs
+rfd = "0.15"
+
+# Image decoding (for app icon)
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+# Error handling
+anyhow = "1"
+thiserror = "2"
+
+# System interface (mlock, setrlimit)
+libc = "0.2"
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1

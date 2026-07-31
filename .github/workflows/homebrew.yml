@@ -1,0 +1,37 @@
+name: Homebrew
+
+# Bumps the tap formula, and only once a release is actually published.
+#
+# This lives apart from the release workflow on purpose. That one builds
+# on a tag push and leaves a *draft*; a draft's tarball URL 404s, so
+# bumping the formula from there would point users at nothing. The
+# `released` event fires when you publish the draft by hand, which is
+# exactly the moment the download becomes real.
+
+on:
+  release:
+    types: [released]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to point the formula at (e.g. v1.0.0)"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  bump:
+    # A private repo has no public tarball to hash, and the tap would
+    # fail on a URL nobody can fetch.
+    if: ${{ !github.event.repository.private }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update Homebrew formula
+        uses: mislav/bump-homebrew-formula-action@v3
+        with:
+          formula-name: schl8
+          homebrew-tap: schbz/homebrew-tap
+          download-url: https://github.com/schbz/schl8/archive/refs/tags/${{ inputs.tag || github.event.release.tag_name }}.tar.gz
+        env:
+          COMMITTER_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}

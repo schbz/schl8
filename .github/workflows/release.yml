@@ -1,0 +1,257 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  # Allow rebuilding release assets for an existing tag from the Actions tab.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  # ── Guard: the tag must match Cargo.toml ───────────────────────────────
+  # A published release cannot have its assets swapped, so a v1.0.0 tag
+  # built from a 0.9.9 manifest ships binaries that report the wrong
+  # version forever. Fail here, before anything is built or uploaded.
+  check-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        name: Compare tag with Cargo.toml
+        run: |
+          set -euo pipefail
+          manifest=$(grep '^version' Cargo.toml | head -1 | cut -d'"' -f2)
+          echo "version=$manifest" >> "$GITHUB_OUTPUT"
+          # workflow_dispatch has no tag; only enforce on tag pushes.
+          if [[ "${GITHUB_REF_TYPE}" != "tag" ]]; then
+            echo "Manual run — skipping tag comparison (manifest $manifest)."
+            exit 0
+          fi
+          tag="${GITHUB_REF_NAME#v}"
+          if [[ "$tag" != "$manifest" ]]; then
+            echo "::error::Tag v$tag does not match Cargo.toml version $manifest."
+            echo "Bump Cargo.toml (and Cargo.lock) or retag, then push again."
+            exit 1
+          fi
+          echo "Tag and manifest agree: $manifest"
+
+  # ── Schl8.app — the download most users want ─────────────────────────
+  # One universal (Apple Silicon + Intel) bundle built with lipo, zipped
+  # with ditto so Finder unzips it with resource forks/permissions intact.
+  app-bundle:
+    needs: check-version
+    runs-on: macos-14
+    # `secrets` cannot be read from a step-level `if`, so the presence of
+    # the signing credentials is resolved once here into plain booleans.
+    env:
+      HAS_CERT: ${{ secrets.APPLE_CERT_P12 != '' }}
+      HAS_NOTARY: ${{ secrets.APPLE_ID != '' && secrets.APPLE_TEAM_ID != '' && secrets.APPLE_APP_PASSWORD != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust targets
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build both architectures
+        run: |
+          cargo build --release --target aarch64-apple-darwin
+          cargo build --release --target x86_64-apple-darwin
+
+      - name: Create universal binary
+        run: |
+          mkdir -p dist
+          lipo -create \
+            target/aarch64-apple-darwin/release/schl8 \
+            target/x86_64-apple-darwin/release/schl8 \
+            -output dist/schl8-universal
+          lipo -info dist/schl8-universal
+
+      # Everything below tolerates missing credentials, so the workflow
+      # keeps producing an (unsigned) build until the secrets exist.
+      - name: Import signing certificate
+        if: env.HAS_CERT == 'true'
+        env:
+          CERT_P12: ${{ secrets.APPLE_CERT_P12 }}
+          CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          echo "$CERT_P12" | base64 --decode > /tmp/cert.p12
+          security create-keychain -p actions build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p actions build.keychain
+          security import /tmp/cert.p12 -k build.keychain \
+            -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: \
+            -s -k actions build.keychain
+          rm -f /tmp/cert.p12
+
+      - name: Build Schl8.app
+        env:
+          # bundle.sh prefers this identity when set; otherwise it signs
+          # ad-hoc exactly as it does locally.
+          SCHL8_SIGN_ID: ${{ secrets.APPLE_SIGN_ID }}
+        run: SCHL8_BIN=dist/schl8-universal ./scripts/bundle.sh
+
+      # Notarization removes the quarantine step users would otherwise
+      # have to run by hand. Requires both a certificate and notary
+      # credentials; skipped entirely without them.
+      - name: Notarize and staple
+        if: env.HAS_CERT == 'true' && env.HAS_NOTARY == 'true'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          ditto -c -k --keepParent dist/Schl8.app /tmp/notarize.zip
+          xcrun notarytool submit /tmp/notarize.zip \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_PASSWORD" \
+            --wait
+          xcrun stapler staple dist/Schl8.app
+          echo "Notarized and stapled."
+
+      - name: Zip app bundle
+        run: |
+          ditto -c -k --keepParent dist/Schl8.app \
+            Schl8-${{ github.ref_name }}-macos-universal.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: schl8-app
+          path: Schl8-${{ github.ref_name }}-macos-universal.zip
+
+  # ── Plain CLI binaries (for cargo/terminal users) ──────────────────────
+  # Both targets cross-compile on the arm64 runner (macos-13 Intel runners
+  # are deprecated and queue indefinitely).
+  cli-binaries:
+    needs: check-version
+    strategy:
+      matrix:
+        target: [aarch64-apple-darwin, x86_64-apple-darwin]
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Package binary
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar czf ../../../schl8-${{ github.ref_name }}-${{ matrix.target }}.tar.gz schl8
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: schl8-${{ matrix.target }}
+          path: schl8-${{ github.ref_name }}-${{ matrix.target }}.tar.gz
+
+  # ── Draft GitHub Release with all assets ───────────────────────────────
+  release:
+    needs: [check-version, app-bundle, cli-binaries]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+
+      # Checksums matter more than usual for a tool that handles secrets:
+      # they let someone confirm a download is the artifact this workflow
+      # produced. Paths are flattened so the file reads cleanly.
+      - name: Generate SHA256SUMS
+        run: |
+          set -euo pipefail
+          : > SHA256SUMS
+          find . \( -name '*.zip' -o -name '*.tar.gz' \) -print0 |
+            sort -z |
+            while IFS= read -r -d '' f; do
+              (cd "$(dirname "$f")" && shasum -a 256 "$(basename "$f")") >> "$GITHUB_WORKSPACE/SHA256SUMS"
+            done
+          cat SHA256SUMS
+
+      # One body file: the standing install notes, plus this version's
+      # CHANGELOG section when it has one. Using body_path alone avoids
+      # the body/body_path precedence trap.
+      - name: Compose release notes
+        run: |
+          set -euo pipefail
+          version="${{ needs.check-version.outputs.version }}"
+          {
+            echo '> ⚠️ **Experimental software.** Schl8 has not had an independent'
+            echo '> security audit. Do not make it the only copy of anything important.'
+            echo "> See the README's project-status warning before use."
+            echo
+            echo '### Install the app'
+            echo
+            echo "1. Download **Schl8-${{ github.ref_name }}-macos-universal.zip**"
+            echo '   below (works on both Apple Silicon and Intel Macs)'
+            echo '2. Unzip it and drag `Schl8.app` into `/Applications`'
+            echo '3. If this build is not notarized, macOS quarantines it. Clear'
+            echo '   the flag once:'
+            echo
+            echo '   ```sh'
+            echo '   xattr -dr com.apple.quarantine /Applications/Schl8.app'
+            echo '   ```'
+            echo
+            echo "4. Install GnuPG if you don't have it: \`brew install gnupg\`"
+            echo
+            echo 'The `.tar.gz` assets are plain terminal binaries for people who'
+            echo 'prefer running `schl8` from a shell. Verify any download against'
+            echo '`SHA256SUMS`:'
+            echo
+            echo '```sh'
+            echo 'shasum -a 256 -c SHA256SUMS --ignore-missing'
+            echo '```'
+            # The hand-written entry, when this version has one.
+            if awk -v v="$version" '
+                 $0 ~ "^## \\[" v "\\]" {found=1; next}
+                 found && /^## \[/ {exit}
+                 found {print}
+               ' CHANGELOG.md > /tmp/section.md && [ -s /tmp/section.md ]; then
+              echo
+              echo '---'
+              echo
+              cat /tmp/section.md
+            fi
+          } > /tmp/body.md
+          echo "--- release body ---"
+          cat /tmp/body.md
+
+      - name: Create draft release
+        uses: softprops/action-gh-release@v2
+        with:
+          # Draft, because a published release's assets cannot be
+          # replaced — this is the last chance to check them.
+          draft: true
+          files: |
+            schl8-app/Schl8-${{ github.ref_name }}-macos-universal.zip
+            schl8-aarch64-apple-darwin/schl8-${{ github.ref_name }}-aarch64-apple-darwin.tar.gz
+            schl8-x86_64-apple-darwin/schl8-${{ github.ref_name }}-x86_64-apple-darwin.tar.gz
+            SHA256SUMS
+          generate_release_notes: true
+          body_path: /tmp/body.md
+
+      - name: Next step
+        run: |
+          echo "### Draft release created" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Review the assets, then publish it from the Releases page." >> "$GITHUB_STEP_SUMMARY"
+          echo "Publishing is what triggers the Homebrew formula bump." >> "$GITHUB_STEP_SUMMARY"
