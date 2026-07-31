@@ -487,11 +487,11 @@ uid:e::::1600000000::HASH2::Bob Expired <bob@example.com>::::::::::0:
     // key ID and its own fingerprint. Files are encrypted to the subkey.
     const KEYRING_LISTING: &str = "\
 tru::1:1700000000:0:3:1:5
-pub:u:4096:1:51438F0920BA4582:1600000000::::::scESC::::::23::0:
-fpr:::::::::6DDFDE6006C1911FE74CDA4651438F0920BA4582:
-uid:u::::1600000000::HASH::Schuyler <opensource@functiondesk.com>::::::::::0:
-sub:u:4096:1:1B9B7C008E278EBF:1600000000::::::e::::::23:
-fpr:::::::::6E0C701A549C3E4EA8F124291B9B7C008E278EBF:
+pub:u:4096:1:AAAABBBBCCCCDDDD:1600000000::::::scESC::::::23::0:
+fpr:::::::::0011AA22BB33CC44DD990011AAAABBBBCCCCDDDD:
+uid:u::::1600000000::HASH::Bob <bob@example.com>::::::::::0:
+sub:u:4096:1:11AA22BB33CC44DD:1600000000::::::e::::::23:
+fpr:::::::::AABBCCDDEEFF00112233AABB11AA22BB33CC44DD:
 pub:u:255:22:AABBCCDDEEFF0011:1700000000:::u:::scESC:::::ed25519:::0:
 fpr:::::::::0123456789ABCDEF0123456789ABCDEF01234567:
 uid:u::::1700000000::HASH2::Alice <alice@example.com>::::::::::0:
@@ -504,13 +504,13 @@ uid:u::::1700000000::HASH2::Alice <alice@example.com>::::::::::0:
         // The encryption subkey ID (what a file is actually encrypted to)
         // resolves to the PRIMARY fingerprint, not the subkey's.
         assert_eq!(
-            map.get("1B9B7C008E278EBF").map(String::as_str),
-            Some("6DDFDE6006C1911FE74CDA4651438F0920BA4582")
+            map.get("11AA22BB33CC44DD").map(String::as_str),
+            Some("0011AA22BB33CC44DD990011AAAABBBBCCCCDDDD")
         );
         // The primary key ID resolves to its own fingerprint.
         assert_eq!(
-            map.get("51438F0920BA4582").map(String::as_str),
-            Some("6DDFDE6006C1911FE74CDA4651438F0920BA4582")
+            map.get("AAAABBBBCCCCDDDD").map(String::as_str),
+            Some("0011AA22BB33CC44DD990011AAAABBBBCCCCDDDD")
         );
         // A second, unrelated primary key.
         assert_eq!(
@@ -525,7 +525,7 @@ uid:u::::1700000000::HASH2::Alice <alice@example.com>::::::::::0:
         // Recipient IDs from packets are uppercase; the map is keyed
         // uppercase, so a lowercased query must be uppercased by callers —
         // verify the stored keys are uppercase.
-        assert!(map.contains_key("1B9B7C008E278EBF"));
-        assert!(!map.contains_key("1b9b7c008e278ebf"));
+        assert!(map.contains_key("11AA22BB33CC44DD"));
+        assert!(!map.contains_key("11aa22bb33cc44dd"));
     }
 }
