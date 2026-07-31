@@ -60,7 +60,10 @@ of these. For the wider brainstorm of candidate ideas, see
       `.txt`/`.md` also open directly (saving always encrypts).
 - [ ] **Code signing + notarization** so Gatekeeper doesn't block downloads
       (the bundle script currently applies an ad-hoc signature).
-- [ ] **Homebrew cask** (for the .app) alongside the existing formula.
+- [ ] **Homebrew tap** — deliberately not done. Installing from a tap means
+      trusting a formula you did not read to fetch a binary nobody notarized,
+      which is a worse trade than downloading the build or compiling it. Worth
+      revisiting once the app is signed and notarized.
 - [x] **Light theme** and theme switching — paper and linen presets, live
       switching in Settings.
 - [x] **Signature verification** — decrypt captures `--status-fd` and shows
@@ -72,9 +75,13 @@ of these. For the wider brainstorm of candidate ideas, see
 
 ## Open-source readiness
 
-- [ ] CONTRIBUTING.md (build, test, security-invariant expectations for PRs)
+- [x] CONTRIBUTING.md (build, test, security-invariant expectations for PRs)
 - [x] SECURITY.md (threat model — expand README section — and vuln reporting contact)
-- [ ] Issue/PR templates; CI badge in README
+- [x] Issue/PR templates; CI badge in README
+- [x] CODE_OF_CONDUCT.md (Contributor Covenant 2.1); Dependabot for cargo and
+      GitHub Actions, pairing with the existing cargo-deny advisory gate
+- [x] Rolling `nightly` pre-release, rebuilt from every code commit that passes
+      the test suite, so there is always a current download at a fixed URL
 - [ ] Screenshots/GIF in README before announcing
 
 ## Known limitations to document or fix

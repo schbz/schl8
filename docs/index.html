@@ -214,10 +214,10 @@
        touches disk. Global hotkeys capture notes from anywhere; a write-only CLI lets AI agents add to your
        notes without ever reading them.</p>
     <div class="cta">
-      <a class="btn btn-primary" href="https://github.com/schbz/schl8/releases/latest">⬇&nbsp; Download for macOS</a>
+      <a class="btn btn-primary" href="https://github.com/schbz/schl8/releases/tag/nightly">⬇&nbsp; Download for macOS</a>
       <a class="btn btn-ghost" href="https://github.com/schbz/schl8">View source on GitHub</a>
     </div>
-    <p class="cta-note">Universal binary · Apple&nbsp;Silicon&nbsp;+&nbsp;Intel · free &amp; open source (MIT) · or <code>brew install schbz/tap/schl8</code></p>
+    <p class="cta-note">Universal binary · Apple&nbsp;Silicon&nbsp;+&nbsp;Intel · free &amp; open source (MIT) · or build it yourself from source</p>
   </div>
 </header>
 
@@ -340,8 +340,10 @@
         <p>Open a <code class="inline">folder.tar.gz.gpg</code> archive and browse every text file inside from a sidebar tree — extracted entirely in memory, with decompression-bomb limits.</p></div>
       <div class="card"><span class="icon">⏱</span><h3>Auto-lock, with a stash</h3>
         <p>Idle timeout, display sleep, or screen lock closes the document and zeroizes buffers — and unsaved edits are first encrypted to the document's own key, so locking never costs you work.</p></div>
+      <div class="card"><span class="icon">🎬</span><h3>Crawl reading</h3>
+        <p>The document scrolls itself, the way opening titles roll, so a long note reads hands-free. Speed, text size and direction are all adjustable mid-crawl; scrolling by hand takes over and it resumes on its own. Good for proof-reading, where the motion stops your eye skating over a sentence it has already read six times.</p></div>
       <div class="card"><span class="icon">🎨</span><h3>Native &amp; configurable</h3>
-        <p>Menu-bar residency, Finder "Open With", theme presets, rebindable shortcuts, a focus mode, an animated crawl-reading mode, and vim-style navigation on qwerty/dvorak/colemak/workman.</p></div>
+        <p>Menu-bar residency, Finder "Open With", 16 contrast-checked themes, favorites and quicknotes on their own global hotkeys, rebindable shortcuts, a focus mode, encrypted settings backup, and vim-style navigation on qwerty/dvorak/colemak/workman.</p></div>
     </div>
   </div>
 </section>
@@ -489,9 +491,11 @@
       </li>
       <li>
         <h4>Download &amp; install Schl8</h4>
-        <p>Get <code class="inline">Schl8-vX.Y.Z-macos-universal.zip</code> from the
-           <a href="https://github.com/schbz/schl8/releases/latest">latest release</a>, unzip, and drag
-           <code class="inline">Schl8.app</code> into Applications.</p>
+        <p>Get <code class="inline">Schl8-nightly-macos-universal.zip</code> from the
+           <a href="https://github.com/schbz/schl8/releases/tag/nightly">nightly build</a>, unzip, and drag
+           <code class="inline">Schl8.app</code> into Applications. It is rebuilt from the latest commit that
+           passed the test suite, so it is always current — and always a development build. Tagged versions,
+           when they exist, live on the <a href="https://github.com/schbz/schl8/releases">releases page</a>.</p>
       </li>
       <li>
         <h4>Clear the quarantine flag</h4>
@@ -858,7 +862,7 @@ cd schl8
   <div class="wrap">
     <div class="links">
       <a href="https://github.com/schbz/schl8">GitHub</a>
-      <a href="https://github.com/schbz/schl8/releases/latest">Releases</a>
+      <a href="https://github.com/schbz/schl8/releases">Releases</a>
       <a href="https://github.com/schbz/schl8/blob/master/CHANGELOG.md">Changelog</a>
       <a href="https://github.com/schbz/schl8/blob/master/SECURITY.md">Security</a>
       <a href="https://github.com/schbz/schl8/blob/master/docs/AGENT-DESIGN.md">Agent design</a>

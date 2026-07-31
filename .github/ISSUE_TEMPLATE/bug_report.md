@@ -33,7 +33,7 @@ What you expected instead.
 
 - Schl8 version: <!-- Help → About Schl8 -->
 - macOS version:
-- Installed how: <!-- release .app · built from source · Homebrew -->
+- Installed how: <!-- tagged release · nightly build · built from source -->
 - GnuPG version: <!-- gpg --version | head -1 -->
 - YubiKey / smart card involved? yes / no
 

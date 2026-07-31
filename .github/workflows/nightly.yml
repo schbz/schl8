@@ -1,0 +1,168 @@
+name: Nightly build
+
+# A permanent `nightly` pre-release, rebuilt whenever code lands on
+# master, so there is always a current Schl8.app to download without
+# waiting for a tagged version.
+#
+# The download URL never changes:
+#   https://github.com/schbz/schl8/releases/download/nightly/Schl8-nightly-macos-universal.zip
+#
+# Two deliberate choices worth knowing:
+#
+# * **It is a pre-release.** That keeps it out of `/releases/latest`, so
+#   a development build can never be mistaken for — or served instead of
+#   — a real tagged version. Links to it must name the `nightly` tag.
+# * **It runs the test suite first.** CI runs the same gate on the same
+#   push, so this duplicates a few minutes of work. That is the price of
+#   never publishing a downloadable binary that failed its own tests,
+#   which for a program that handles people's secrets is worth paying.
+#
+# Doc-only commits skip all of it: see the paths filter below.
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "src/**"
+      - "assets/**"
+      - "scripts/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/nightly.yml"
+  # Rebuild on demand — handy after changing the workflow itself.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# A newer push makes an in-flight nightly pointless; let it win rather
+# than racing it to the same tag.
+concurrency:
+  group: nightly
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust targets
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      # The integration tests do real encrypt/decrypt round-trips against
+      # an ephemeral keyring; without gpg they skip themselves, which
+      # would make this gate pass vacuously.
+      - name: Install GnuPG
+        run: brew install gnupg
+
+      - name: Tests
+        run: cargo test
+
+      - name: Build both architectures
+        run: |
+          cargo build --release --target aarch64-apple-darwin
+          cargo build --release --target x86_64-apple-darwin
+
+      - name: Create universal binary
+        run: |
+          mkdir -p dist
+          lipo -create \
+            target/aarch64-apple-darwin/release/schl8 \
+            target/x86_64-apple-darwin/release/schl8 \
+            -output dist/schl8-universal
+          lipo -info dist/schl8-universal
+
+      - name: Build Schl8.app
+        run: SCHL8_BIN=dist/schl8-universal ./scripts/bundle.sh
+
+      # ditto rather than zip, so Finder unpacks the bundle with its
+      # permissions and resource forks intact.
+      - name: Package
+        run: |
+          set -euo pipefail
+          ditto -c -k --keepParent dist/Schl8.app Schl8-nightly-macos-universal.zip
+          tar czf schl8-nightly-macos-universal.tar.gz -C dist schl8-universal
+          shasum -a 256 Schl8-nightly-macos-universal.zip \
+                        schl8-nightly-macos-universal.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Describe this build
+        id: desc
+        run: |
+          set -euo pipefail
+          {
+            echo "version=$(grep '^version' Cargo.toml | head -1 | cut -d'"' -f2)"
+            echo "short=$(git rev-parse --short HEAD)"
+            echo "date=$(date -u '+%Y-%m-%d %H:%M UTC')"
+          } >> "$GITHUB_OUTPUT"
+
+      # Replacing the release outright is more predictable than patching
+      # assets onto an existing one: no stale file can survive a rename,
+      # and the tag always points at the commit that was actually built.
+      - name: Clear the previous nightly
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release delete nightly --yes --cleanup-tag || true
+
+      - name: Compose notes
+        run: |
+          set -euo pipefail
+          cat > /tmp/nightly.md <<'HEADER'
+          > ⚠️ **This is an automatic development build**, produced from the
+          > latest commit on `master`. It passed the test suite and nothing
+          > more — it has had no release review. For something more settled,
+          > use a [tagged release](https://github.com/schbz/schl8/releases).
+          >
+          > Schl8 has never had an independent security audit. Never let a
+          > Schl8-managed file be the only copy of anything important.
+
+          HEADER
+          cat >> /tmp/nightly.md <<HEADER
+          Built from \`${{ steps.desc.outputs.short }}\` on ${{ steps.desc.outputs.date }} · version ${{ steps.desc.outputs.version }}
+
+          HEADER
+          cat >> /tmp/nightly.md <<'HEADER'
+          ### Install
+
+          1. Download **Schl8-nightly-macos-universal.zip** below — one file for
+             both Apple Silicon and Intel.
+          2. Unzip it and drag `Schl8.app` into `/Applications`.
+          3. These builds are not notarized with Apple, so macOS quarantines
+             them. Clear the flag once:
+
+             ```sh
+             xattr -dr com.apple.quarantine /Applications/Schl8.app
+             ```
+
+          4. Install GnuPG if you don't already have it: `brew install gnupg`.
+
+          The `.tar.gz` is the bare `schl8` terminal binary, for running from a
+          shell. Check either download against `SHA256SUMS`:
+
+          ```sh
+          shasum -a 256 -c SHA256SUMS --ignore-missing
+          ```
+          HEADER
+          cat /tmp/nightly.md
+
+      - name: Publish the nightly
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nightly
+          target_commitish: ${{ github.sha }}
+          name: Nightly build
+          # Keeps it out of /releases/latest, which is reserved for real
+          # tagged versions.
+          prerelease: true
+          body_path: /tmp/nightly.md
+          files: |
+            Schl8-nightly-macos-universal.zip
+            schl8-nightly-macos-universal.tar.gz
+            SHA256SUMS

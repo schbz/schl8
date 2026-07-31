@@ -1,7 +1,13 @@
 # Schl8
 
 Secure macOS-native GUI (egui/eframe) for viewing, editing, and re-encrypting
-GPG-protected text/markdown files, with YubiKey support via gpg-agent.
+encrypted text/markdown files. Two backends: GPG (YubiKey and other smart
+cards via gpg-agent) and AGE derived from a 12-word seed phrase. GPG is
+optional at runtime — with no `gpg` installed the app runs AGE-only.
+
+`AGENTS.md` is a pointer to this file; this one is canonical.
+[CONTRIBUTING.md](CONTRIBUTING.md) covers the same invariants for outside
+contributors.
 
 ## Commands
 
@@ -9,6 +15,8 @@ GPG-protected text/markdown files, with YubiKey support via gpg-agent.
 - Test: `cargo test`
 - Lint (CI-enforced): `cargo fmt --check && cargo clippy --all-targets -- -D warnings`
 - Test fixtures live in `test_files/` (encrypted to the developer's key)
+- Never run the app against the real config while testing — set
+  `XDG_CONFIG_HOME` to a scratch directory first
 
 ## Architecture
 

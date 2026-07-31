@@ -254,4 +254,4 @@ jobs:
           echo "### Draft release created" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "Review the assets, then publish it from the Releases page." >> "$GITHUB_STEP_SUMMARY"
-          echo "Publishing is what triggers the Homebrew formula bump." >> "$GITHUB_STEP_SUMMARY"
+          echo "Until it is published, the rolling \`nightly\` build remains the newest download." >> "$GITHUB_STEP_SUMMARY"

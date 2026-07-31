@@ -397,8 +397,11 @@ it deserves active management:
   modern macOS; there's no onboarding for granting it, so the hotkey will
   appear to "not work" with no explanation. Add a first-run check +
   guidance.
-- **Homebrew formula builds from source** and requires the Rust toolchain;
-  a signed cask of the `.app` would reach non-developers.
+- **Distribution asks a lot of the user.** There is no Homebrew tap, and the
+  published builds are not notarized, so installing means clearing a
+  quarantine flag by hand — a step that trains people to disarm exactly the
+  protection that would catch a malicious build. Signing and notarization
+  would fix it properly; a cask without them would only move the problem.
 - **No crash/telemetry policy** (appropriately — but say so explicitly for
   a privacy tool, and ensure no panic messages or paths escape to Apple's
   diagnostics).

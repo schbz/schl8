@@ -32,6 +32,12 @@ are not treated as vulnerabilities.
 
 Only the latest release is supported. There are no backported fixes.
 
+The rolling [`nightly`](https://github.com/schbz/schl8/releases/tag/nightly)
+build is rebuilt from every commit that passes the test suite. It has had no
+release review, and a fix reported against it may be a bug that never reached
+a tagged version — that is still worth reporting, just say which build you
+were on.
+
 ## Reporting a vulnerability
 
 If you find a way to make Schl8 leak plaintext or key material *within

@@ -7,7 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Nothing yet.
+Documentation and repository work only — no change to the program itself.
+
+### Added
+
+- **A build is now published on every commit.** A permanent `nightly`
+  pre-release is rebuilt whenever code lands on `master` and the test
+  suite passes, so there is always a current `Schl8.app` to download at
+  a URL that never changes. Doc-only commits skip the build. It stays a
+  *pre-release* deliberately, which keeps it out of `/releases/latest`
+  so a development build can never be served in place of a tagged one.
+- **A much longer README.** How the name is pronounced (*schlate* — the
+  `8` is *ate*, and SCHLATE is what the acronym spells) and every
+  shipped feature, with what it is for rather than only what it does.
+  Crawl, the encrypted stash, favorites, settings backup, uninstall,
+  interface scale and Lock Now had not been documented anywhere.
+- `CONTRIBUTING.md`, leading with the security invariants a change must
+  not break, and `CODE_OF_CONDUCT.md`.
+- Feature-request and PR templates; an issue-template config that routes
+  vulnerability reports to a private advisory instead of the public
+  tracker.
+- Dependabot for cargo and GitHub Actions. It pairs with the cargo-deny
+  gate already in CI: cargo-deny says a dependency became dangerous,
+  Dependabot opens the pull request that fixes it.
+- CI and nightly status badges in the README.
+
+### Changed
+
+- `AGENTS.md` was a byte-for-byte duplicate of `CLAUDE.md` — two copies
+  that were certain to drift apart eventually. It now points at it.
+- `CLAUDE.md` described the app as GPG-only in its opening line, written
+  before the AGE backend existed.
+
+### Removed
+
+- **Homebrew.** There was no tap, so the workflow and the `brew install`
+  instructions pointed at something that did not exist. Installing from a
+  tap would also mean trusting an unread formula to fetch an un-notarized
+  binary, which is a worse trade than downloading the build deliberately
+  or compiling it. Worth revisiting once the app is signed and notarized.
+
+### Fixed
+
+- The README listed GnuPG as a requirement. It has been optional since
+  the AGE backend landed — with no `gpg` installed, Schl8 runs AGE-only.
 
 ## [1.0.4] - 2026-07-31
 

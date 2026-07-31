@@ -83,7 +83,7 @@ if command -v gh >/dev/null 2>&1; then
         print "note: could not attach to the run; check the Actions tab."
     print "\nThe release is a DRAFT. Review the assets, then publish it:"
     print "    gh release edit $TAG --draft=false"
-    print "Publishing is what triggers the Homebrew bump."
+    print "Until then the rolling 'nightly' build stays the newest download."
 else
     print "Pushed $TAG. Watch progress in the Actions tab; the release"
     print "lands as a draft for you to review and publish."
