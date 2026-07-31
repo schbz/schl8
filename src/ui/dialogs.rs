@@ -2094,3 +2094,414 @@ impl Default for ToolkitDialog {
         Self::new()
     }
 }
+
+// ── Back Up Settings ─────────────────────────────────────────────────────────
+
+/// What the backup dialog is asking the app to do.
+#[derive(PartialEq, Clone, Copy)]
+pub enum BackupAction {
+    None,
+    /// Pick a destination and write the bundle.
+    Save,
+}
+
+/// "Back Up Settings" — choose protection, then a destination.
+pub struct BackupDialog {
+    pub open: bool,
+    /// Index into `choices`; 0 is always "not encrypted".
+    pub selected: usize,
+    pub choices: Vec<(String, crate::config_backup::Protection)>,
+    pub status: Option<(String, bool)>,
+    /// Set when the caller wants the dialog to close on success.
+    pub close_when_done: bool,
+}
+
+impl BackupDialog {
+    pub fn new() -> Self {
+        Self {
+            open: false,
+            selected: 0,
+            choices: Vec::new(),
+            status: None,
+            close_when_done: false,
+        }
+    }
+
+    /// Open, seeded with the recipients this machine can encrypt to.
+    pub fn open_with(&mut self, cfg: &crate::config::Config) {
+        let mut choices = vec![(
+            "Not encrypted".to_string(),
+            crate::config_backup::Protection::None,
+        )];
+        choices.extend(crate::config_backup::available_recipients(cfg));
+        // Default to the first real key when there is one: a backup of
+        // this file is worth sealing, and the safe option should be the
+        // one that needs no thought.
+        self.selected = if choices.len() > 1 { 1 } else { 0 };
+        self.choices = choices;
+        self.status = None;
+        self.open = true;
+    }
+
+    pub fn protection(&self) -> crate::config_backup::Protection {
+        self.choices
+            .get(self.selected)
+            .map(|(_, p)| p.clone())
+            .unwrap_or(crate::config_backup::Protection::None)
+    }
+
+    pub fn render(&mut self, ctx: &egui::Context) -> BackupAction {
+        if !self.open {
+            return BackupAction::None;
+        }
+        let mut action = BackupAction::None;
+        let mut is_open = self.open;
+
+        egui::Window::new("Back Up Settings")
+            .open(&mut is_open)
+            .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
+            .resizable(false)
+            .collapsible(false)
+            .default_width(theme::dialog_width(ctx, 480.0))
+            .max_width(theme::dialog_max_width(ctx))
+            .frame(egui::Frame::window(&ctx.style()).fill(theme::bg_primary()))
+            .show(ctx, |ui| {
+                ui.spacing_mut().item_spacing.y = 8.0;
+
+                ui.label(
+                    RichText::new("Save your setup, not your notes")
+                        .size(14.0)
+                        .strong()
+                        .color(theme::text_strong()),
+                );
+                ui.label(
+                    RichText::new(
+                        "Your quicknotes, save plans, keys, hotkeys and any unsaved \
+                         edits held from a locked session — everything needed to \
+                         rebuild this setup on another Mac. Your encrypted files are \
+                         not copied; they already live wherever you put them.",
+                    )
+                    .size(12.5)
+                    .color(theme::text_dim()),
+                );
+
+                ui.add_space(4.0);
+                ui.separator();
+
+                ui.label(
+                    RichText::new("Encrypt the backup to")
+                        .size(13.0)
+                        .color(theme::text_primary()),
+                );
+                for (i, (label, _)) in self.choices.iter().enumerate() {
+                    ui.radio_value(&mut self.selected, i, RichText::new(label).size(12.5));
+                }
+                if self.choices.len() == 1 {
+                    ui.label(
+                        RichText::new(
+                            "No keys are registered yet, so only an unencrypted \
+                             backup is possible.",
+                        )
+                        .size(11.5)
+                        .color(theme::text_dim()),
+                    );
+                }
+
+                if self.selected == 0 {
+                    ui.add_space(2.0);
+                    ui.label(
+                        RichText::new(
+                            "An unencrypted backup holds no keys and no note text, but it \
+                             does list your file paths and the names on your keys.",
+                        )
+                        .size(11.5)
+                        .color(theme::accent_yellow()),
+                    );
+                }
+
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                RichText::new("  Choose Location…  ")
+                                    .size(13.0)
+                                    .color(theme::badge_text())
+                                    .strong(),
+                            )
+                            .fill(theme::badge_bg())
+                            .corner_radius(theme::RADIUS),
+                        )
+                        .clicked()
+                    {
+                        action = BackupAction::Save;
+                    }
+                    if ui.button(RichText::new("  Cancel  ").size(13.0)).clicked() {
+                        self.open = false;
+                    }
+                });
+
+                if let Some((msg, is_err)) = &self.status {
+                    ui.add_space(2.0);
+                    ui.label(RichText::new(msg).size(12.0).color(if *is_err {
+                        theme::accent_red()
+                    } else {
+                        theme::accent_green()
+                    }));
+                }
+            });
+
+        if !is_open {
+            self.open = false;
+        }
+        action
+    }
+}
+
+impl Default for BackupDialog {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ── Uninstall ────────────────────────────────────────────────────────────────
+
+#[derive(PartialEq, Clone, Copy)]
+pub enum UninstallAction {
+    None,
+    /// Open the backup dialog first.
+    BackUpFirst,
+    /// Do it: trash everything and quit.
+    Remove,
+}
+
+/// "Uninstall Schl8" — shows the real paths, then requires a typed word.
+///
+/// A checkbox is too easy to click through for something irreversible;
+/// typing the word means the reader has at least read one line.
+pub struct UninstallDialog {
+    pub open: bool,
+    pub plan: crate::uninstall::Plan,
+    pub confirm_text: String,
+    pub status: Option<(String, bool)>,
+    pub finished: bool,
+}
+
+const CONFIRM_WORD: &str = "REMOVE";
+
+impl UninstallDialog {
+    pub fn new() -> Self {
+        Self {
+            open: false,
+            plan: crate::uninstall::Plan::default(),
+            confirm_text: String::new(),
+            status: None,
+            finished: false,
+        }
+    }
+
+    pub fn open_with(&mut self, plan: crate::uninstall::Plan) {
+        self.plan = plan;
+        self.confirm_text.clear();
+        self.status = None;
+        self.finished = false;
+        self.open = true;
+    }
+
+    pub fn render(&mut self, ctx: &egui::Context) -> UninstallAction {
+        if !self.open {
+            return UninstallAction::None;
+        }
+        let mut action = UninstallAction::None;
+        let mut is_open = self.open;
+
+        egui::Window::new("Uninstall Schl8")
+            .open(&mut is_open)
+            .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
+            .resizable(false)
+            .collapsible(false)
+            .default_width(theme::dialog_width(ctx, 540.0))
+            .max_width(theme::dialog_max_width(ctx))
+            .max_height((ctx.screen_rect().height() - 90.0).max(240.0))
+            .vscroll(true)
+            .frame(egui::Frame::window(&ctx.style()).fill(theme::bg_primary()))
+            .show(ctx, |ui| {
+                ui.spacing_mut().item_spacing.y = 7.0;
+
+                // The first thing anyone uninstalling a notes app wants
+                // to know.
+                ui.label(
+                    RichText::new("Your notes are not touched")
+                        .size(14.0)
+                        .strong()
+                        .color(theme::accent_green()),
+                );
+                ui.label(
+                    RichText::new(
+                        "Every encrypted file Schl8 has written stays exactly where it \
+                         is. This removes the application and its own settings, nothing \
+                         else. Your keys — in your GnuPG keyring, or derived from your \
+                         seed phrase — are untouched too.",
+                    )
+                    .size(12.5)
+                    .color(theme::text_dim()),
+                );
+
+                ui.add_space(4.0);
+                ui.separator();
+
+                ui.label(
+                    RichText::new("What will be moved to the Trash")
+                        .size(13.0)
+                        .strong()
+                        .color(theme::text_strong()),
+                );
+
+                if self.plan.items.is_empty() && self.plan.app_bundle.is_none() {
+                    ui.label(
+                        RichText::new("Nothing found — Schl8 has nothing installed here.")
+                            .size(12.5)
+                            .color(theme::text_dim()),
+                    );
+                }
+                for item in &self.plan.items {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(
+                            RichText::new(item.path.display().to_string())
+                                .size(11.5)
+                                .monospace()
+                                .color(if item.precious {
+                                    theme::accent_yellow()
+                                } else {
+                                    theme::text_primary()
+                                }),
+                        );
+                        ui.label(
+                            RichText::new(format!("— {}", item.what))
+                                .size(11.5)
+                                .color(theme::text_dim()),
+                        );
+                    });
+                }
+                if let Some(app) = &self.plan.app_bundle {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(
+                            RichText::new(app.display().to_string())
+                                .size(11.5)
+                                .monospace()
+                                .color(theme::text_primary()),
+                        );
+                        ui.label(
+                            RichText::new("— the application itself")
+                                .size(11.5)
+                                .color(theme::text_dim()),
+                        );
+                    });
+                }
+
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new(
+                        "Everything goes to the Trash, so an uninstall you regret is a \
+                         drag back out — until you empty it.",
+                    )
+                    .size(11.5)
+                    .color(theme::text_dim()),
+                );
+
+                if self.plan.has_precious() {
+                    ui.add_space(4.0);
+                    ui.label(
+                        RichText::new(
+                            "The highlighted items cannot be rebuilt: your settings, and \
+                             any unsaved edits held from a locked session. Back them up \
+                             first — it takes a moment.",
+                        )
+                        .size(12.0)
+                        .color(theme::accent_yellow()),
+                    );
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                RichText::new("  Back Up Settings First…  ")
+                                    .size(13.0)
+                                    .color(theme::badge_text())
+                                    .strong(),
+                            )
+                            .fill(theme::badge_bg())
+                            .corner_radius(theme::RADIUS),
+                        )
+                        .clicked()
+                    {
+                        action = UninstallAction::BackUpFirst;
+                    }
+                }
+
+                ui.add_space(4.0);
+                ui.separator();
+
+                ui.label(
+                    RichText::new(format!("Type {CONFIRM_WORD} to confirm"))
+                        .size(12.5)
+                        .color(theme::text_primary()),
+                );
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.confirm_text)
+                        .desired_width(160.0)
+                        .font(egui::TextStyle::Monospace),
+                );
+
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    let armed = self.confirm_text.trim() == CONFIRM_WORD;
+                    if ui
+                        .add_enabled(
+                            armed,
+                            egui::Button::new(
+                                RichText::new("  Remove & Quit  ")
+                                    .size(13.0)
+                                    .color(if armed {
+                                        theme::badge_text()
+                                    } else {
+                                        theme::text_dim()
+                                    })
+                                    .strong(),
+                            )
+                            .fill(if armed {
+                                theme::accent_red()
+                            } else {
+                                theme::bg_raised()
+                            })
+                            .corner_radius(theme::RADIUS),
+                        )
+                        .clicked()
+                    {
+                        action = UninstallAction::Remove;
+                    }
+                    if ui.button(RichText::new("  Cancel  ").size(13.0)).clicked() {
+                        self.open = false;
+                    }
+                });
+
+                if let Some((msg, is_err)) = &self.status {
+                    ui.add_space(2.0);
+                    ui.label(RichText::new(msg).size(12.0).color(if *is_err {
+                        theme::accent_red()
+                    } else {
+                        theme::text_primary()
+                    }));
+                }
+            });
+
+        if !is_open {
+            self.open = false;
+        }
+        action
+    }
+}
+
+impl Default for UninstallDialog {
+    fn default() -> Self {
+        Self::new()
+    }
+}

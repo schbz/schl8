@@ -56,6 +56,15 @@ GPG-protected text/markdown files, with YubiKey support via gpg-agent.
   ownership marker; uninstall removes only marked files, so a file the
   user wrote under the same name is never deleted. Not a pattern to
   repeat per platform.
+- `src/config_backup.rs` — File → Back Up Settings. Bundles the config
+  directory (settings + held edits + a plain-text manifest) as a
+  `.tar.gz` built in memory, optionally encrypted to any registered GPG
+  or age recipient. The bundle is a normal archive, so an encrypted
+  backup is also a vault the app can open.
+- `src/uninstall.rs` — Help → Uninstall. `plan()` reports every path
+  that belongs to the app without touching disk; `execute()` moves them
+  to the Trash via Finder (recoverable, and the only way the app can
+  remove its own running bundle), leaving notes and keys alone.
 - `src/cli_install.rs` — Help → Install Command Line Tool. Symlinks the
   binary onto PATH, preferring a directory that is already writable and
   visible to the login shell over prompting for an administrator. Asks

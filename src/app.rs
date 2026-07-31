@@ -151,6 +151,8 @@ pub struct App {
     install_help_dialog: dialogs::InstallHelpDialog,
     cli_tool_dialog: dialogs::CliToolDialog,
     toolkit_dialog: dialogs::ToolkitDialog,
+    backup_dialog: dialogs::BackupDialog,
+    uninstall_dialog: dialogs::UninstallDialog,
     settings_dialog: crate::ui::settings::SettingsDialog,
     discard_dialog: dialogs::DiscardDialog,
     quit_dialog: dialogs::QuitDialog,
@@ -288,6 +290,8 @@ impl App {
             install_help_dialog: dialogs::InstallHelpDialog::new(),
             cli_tool_dialog: dialogs::CliToolDialog::new(),
             toolkit_dialog: dialogs::ToolkitDialog::new(),
+            backup_dialog: dialogs::BackupDialog::new(),
+            uninstall_dialog: dialogs::UninstallDialog::new(),
             settings_dialog: crate::ui::settings::SettingsDialog::new(),
             discard_dialog: dialogs::DiscardDialog::new(),
             quit_dialog: dialogs::QuitDialog::new(),
@@ -1272,6 +1276,78 @@ impl App {
                     Err(e) => (format!("{e}"), true),
                 });
                 self.refresh_toolkit_plan();
+            }
+        }
+    }
+
+    fn render_backup_dialog(&mut self, ctx: &egui::Context) {
+        if self.backup_dialog.render(ctx) != dialogs::BackupAction::Save {
+            return;
+        }
+        let protection = self.backup_dialog.protection();
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let name = crate::config_backup::suggested_name(&protection, &today);
+
+        let mut dialog = rfd::FileDialog::new()
+            .set_title("Save settings backup")
+            .set_file_name(&name);
+        if let Ok(dir) = self.config.ensure_notes_dir() {
+            dialog = dialog.set_directory(dir);
+        }
+        let Some(dest) = dialog.save_file() else {
+            return; // cancelled
+        };
+
+        self.backup_dialog.status = Some(match crate::config_backup::write(&dest, &protection) {
+            Ok(()) => {
+                let sealed = protection != crate::config_backup::Protection::None;
+                if self.backup_dialog.close_when_done {
+                    self.backup_dialog.open = false;
+                }
+                (
+                    format!(
+                        "Saved to {}{}",
+                        dest.display(),
+                        if sealed { " (encrypted)" } else { "" }
+                    ),
+                    false,
+                )
+            }
+            Err(e) => (format!("{e:#}"), true),
+        });
+    }
+
+    fn render_uninstall_dialog(&mut self, ctx: &egui::Context) {
+        match self.uninstall_dialog.render(ctx) {
+            dialogs::UninstallAction::None => {}
+            dialogs::UninstallAction::BackUpFirst => {
+                // Leave the uninstall window open behind it, so the
+                // backup is a detour rather than a restart.
+                self.backup_dialog.close_when_done = false;
+                self.backup_dialog.open_with(&self.config);
+            }
+            dialogs::UninstallAction::Remove => {
+                let outcome = crate::uninstall::execute(&self.uninstall_dialog.plan);
+                if outcome.failed.is_empty() {
+                    // Nothing left to run from; quitting is the honest end.
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                } else {
+                    let detail = outcome
+                        .failed
+                        .iter()
+                        .map(|(p, e)| format!("{}: {e}", p.display()))
+                        .collect::<Vec<_>>()
+                        .join("; ");
+                    self.uninstall_dialog.status = Some((
+                        format!(
+                            "Removed {} item(s); {} could not be moved — {detail}",
+                            outcome.removed.len(),
+                            outcome.failed.len()
+                        ),
+                        true,
+                    ));
+                    self.uninstall_dialog.plan = crate::uninstall::plan();
+                }
             }
         }
     }
@@ -3727,6 +3803,13 @@ impl eframe::App for App {
                 menu::MenuAction::InstallCliTool => {
                     self.install_cli_tool();
                 }
+                menu::MenuAction::BackUpSettings => {
+                    self.backup_dialog.close_when_done = true;
+                    self.backup_dialog.open_with(&self.config);
+                }
+                menu::MenuAction::Uninstall => {
+                    self.uninstall_dialog.open_with(crate::uninstall::plan());
+                }
                 menu::MenuAction::AgentToolkit => {
                     self.refresh_toolkit_plan();
                     self.toolkit_dialog.status = None;
@@ -4258,6 +4341,8 @@ impl eframe::App for App {
         self.install_help_dialog.render(ctx);
         self.cli_tool_dialog.render(ctx);
         self.render_toolkit_dialog(ctx);
+        self.render_backup_dialog(ctx);
+        self.render_uninstall_dialog(ctx);
 
         // Settings dialog — on Apply, persist and apply changes live.
         if let Some((new_config, persist)) = self.settings_dialog.render(ctx) {

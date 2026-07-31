@@ -20,6 +20,10 @@ pub enum MenuAction {
     InstallCliTool,
     /// Open the agent-toolkit window (make Schl8 permanent).
     AgentToolkit,
+    /// Save the app's own settings, optionally encrypted.
+    BackUpSettings,
+    /// Remove Schl8 and everything it installed.
+    Uninstall,
     Save,
     SaveTargets,
     EncryptAndSave,
@@ -167,6 +171,17 @@ pub fn render(ui: &mut Ui, flags: MenuFlags) -> Option<MenuAction> {
 
             if ui.button("Settings…\t\tCmd+,").clicked() {
                 action = Some(MenuAction::Settings);
+                ui.close_menu();
+            }
+            if ui
+                .button("Back Up Settings\u{2026}")
+                .on_hover_text(
+                    "Save your quicknotes, save plans, keys and held edits as one \
+                     archive — encrypted to a key of your choice",
+                )
+                .clicked()
+            {
+                action = Some(MenuAction::BackUpSettings);
                 ui.close_menu();
             }
 
@@ -413,6 +428,18 @@ pub fn render(ui: &mut Ui, flags: MenuFlags) -> Option<MenuAction> {
             ui.separator();
             if ui.button("About Schl8").clicked() {
                 action = Some(MenuAction::About);
+                ui.close_menu();
+            }
+            ui.separator();
+            if ui
+                .button("Uninstall Schl8\u{2026}")
+                .on_hover_text(
+                    "Move Schl8 and everything it installed to the Trash. Your \
+                     encrypted files are never touched.",
+                )
+                .clicked()
+            {
+                action = Some(MenuAction::Uninstall);
                 ui.close_menu();
             }
         });

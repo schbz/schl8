@@ -6,6 +6,7 @@ mod app;
 mod cli;
 mod cli_install;
 mod config;
+mod config_backup;
 mod crypto;
 mod document;
 mod hooks;
@@ -18,6 +19,7 @@ mod macos_power;
 mod security;
 mod tray;
 mod ui;
+mod uninstall;
 mod update;
 
 use anyhow::{Context, Result};

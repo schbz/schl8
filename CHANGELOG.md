@@ -9,6 +9,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Nothing yet.
 
+## [1.0.1] - 2026-07-31
+
+### Added
+
+- **File → Back Up Settings…** writes everything needed to rebuild this
+  setup on another Mac — quicknotes, save plans, recipients, hotkeys,
+  and any edits held from a locked session — as a single `.tar.gz`.
+  Losing the config loses no encrypted file, but it loses the *map*:
+  which of forty `.gpg` files was the journal, and which key opens it.
+
+  The backup can be **encrypted to any registered key**, GPG or age, and
+  defaults to one when a key exists. The config holds no key material
+  and no note text, but it does hold file paths and the names on your
+  keys, which is worth sealing before it reaches a backup disk. The
+  archive is built in memory, so an encrypted backup never passes
+  through a plaintext temp file. A plain-text `ABOUT-THIS-BACKUP.txt`
+  inside explains how to restore it, for whoever opens it later with no
+  memory of today.
+
+  Because the bundle is an ordinary `.tar.gz`, an encrypted backup is
+  also a vault Schl8 can already open and browse — recovery does not
+  depend on a restore command existing by then.
+
+- **Help → Uninstall Schl8…** removes the application and everything it
+  installed: settings and held edits, the login item, preferences, the
+  command-line symlink, and the Claude Code skill and slash commands.
+  Dragging the bundle to the Trash leaves all of that behind, and
+  nothing else on the machine knows those files belong together.
+
+  The confirmation screen lists the real paths, says in its first line
+  that **encrypted notes and keys are never touched**, highlights the
+  two things that cannot be rebuilt, offers a backup without losing your
+  place, and requires typing a word rather than clicking a checkbox.
+  Everything goes to the Trash rather than being unlinked, so an
+  uninstall regretted thirty seconds later is a drag back out. The app
+  bundle is trashed last: had it gone first, a later failure would leave
+  litter with no app left to clean it up.
+
 ## [1.0.0] - 2026-07-31
 
 First release under the name **Schl8**. The application is the one
