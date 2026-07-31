@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Nothing yet.
 
+## [1.0.3] - 2026-07-31
+
+### Added
+
+- **New files now say when their text is not protected yet.** Until a
+  file is saved for the first time it has no key of its own, so unsaved
+  text cannot be encrypted into the lock stash and *Lock Now* would
+  discard it. 1.0.2 made that visible after the fact; this makes it
+  visible before.
+
+  Creating a new file with no stash key configured shows a warning that
+  stays up long enough to read, naming both ways out: save the file, or
+  set a stash key under Settings › Security. It is skipped entirely when
+  a stash key is already configured, because then there is no gap.
+
+  The risk lasts until the first save, which is longer than any message
+  stays on screen, so the status bar carries an **UNPROTECTED** chip for
+  as long as it applies. It replaces the existing "LOCK PAUSED" chip in
+  that state rather than sitting beside it: that one's explanation
+  promises Schl8 "never silently discards your edits", which is exactly
+  what is not true here.
+
 ## [1.0.2] - 2026-07-31
 
 ### Fixed

@@ -1385,8 +1385,20 @@ impl App {
     }
 
     fn show_toast(&mut self, message: String, is_error: bool, ctx: &egui::Context) {
+        self.show_toast_for(message, is_error, 4.0, ctx);
+    }
+
+    /// A toast that lingers. Four seconds suits "Saved"; a warning about
+    /// losing work needs long enough to actually be read.
+    fn show_toast_for(
+        &mut self,
+        message: String,
+        is_error: bool,
+        seconds: f64,
+        ctx: &egui::Context,
+    ) {
         let now = ctx.input(|i| i.time);
-        self.toast = Some((message, is_error, now + 4.0));
+        self.toast = Some((message, is_error, now + seconds));
     }
 
     /// Suggested filename when adding a save-plan destination: the current
@@ -4834,6 +4846,11 @@ impl eframe::App for App {
         } else {
             720.0
         };
+        // Computed before the match, which borrows `self.state` mutably.
+        // True only while there is unsaved text AND no key to encrypt it
+        // to — the window in which Lock Now would discard it.
+        let unsaved_unprotected = (self.has_unsaved_edits() || !self.jot.text().trim().is_empty())
+            && !self.can_secure_unsaved_work();
         let content_transition = match &mut self.state {
             State::FilePicker => render_file_picker(ctx, &self.config, &mut self.recent_stamps),
             State::Decrypting { path, .. } => render_decrypting(ctx, path),
@@ -4855,6 +4872,7 @@ impl eframe::App for App {
                 chromeless,
                 keybindings::Layout::parse(&self.config.app.keyboard_layout),
                 stamp.as_ref(),
+                unsaved_unprotected,
                 view_opts,
                 &mut self.pending_jump,
                 &mut self.view_metrics,
@@ -4884,6 +4902,7 @@ impl eframe::App for App {
                 chromeless,
                 keybindings::Layout::parse(&self.config.app.keyboard_layout),
                 stamp.as_ref(),
+                unsaved_unprotected,
                 view_opts,
                 &mut self.pending_jump,
                 &mut self.view_metrics,
@@ -5007,6 +5026,22 @@ impl eframe::App for App {
                     "Schl8 \u{2014} {label} (new)"
                 )));
                 self.state = new_empty_document(file_type);
+                // A file with no key of its own cannot have its unsaved
+                // text encrypted into the lock stash, so Lock Now would
+                // discard it. Say so now, while saving is still one
+                // keystroke away — afterwards it is too late to matter.
+                if !self.can_secure_unsaved_work() {
+                    self.show_toast_for(
+                        "New file: save it before locking. Until the first save there \
+                         is no key to protect unsaved text with, so Lock Now would \
+                         discard it. Settings \u{203A} Security can set a stash key \
+                         that removes this gap."
+                            .to_string(),
+                        true,
+                        12.0,
+                        ctx,
+                    );
+                }
             }
             Transition::OpenJot => {
                 self.jot.show();
@@ -5645,6 +5680,9 @@ fn render_viewing(
     focus_mode: bool,
     layout: keybindings::Layout,
     stamp: Option<&statusbar::FileStamp>,
+    // True when unsaved edits exist that cannot be encrypted into the
+    // lock stash — an unsaved new file has no key of its own.
+    unsaved_unprotected: bool,
     opts: viewer::ViewOptions,
     jump: &mut Option<f32>,
     metrics: &mut (f32, f32, f32),
@@ -5756,6 +5794,7 @@ fn render_viewing(
                     None,
                     &doc.signature,
                     is_editing && *modified,
+                    unsaved_unprotected,
                     stamp,
                     compact,
                 )
@@ -5844,6 +5883,8 @@ fn render_viewing_archive(
     focus_mode: bool,
     layout: keybindings::Layout,
     stamp: Option<&statusbar::FileStamp>,
+    // See `render_viewing`.
+    unsaved_unprotected: bool,
     opts: viewer::ViewOptions,
     jump: &mut Option<f32>,
     metrics: &mut (f32, f32, f32),
@@ -6132,6 +6173,7 @@ fn render_viewing_archive(
                     Some((*selected + 1, archive.entries.len())),
                     &crate::crypto::gpg::SignatureStatus::Unsigned,
                     is_editing && *modified,
+                    unsaved_unprotected,
                     stamp,
                     compact,
                 )
@@ -6631,5 +6673,61 @@ mod relock_tests {
         // app forgets it rather than failing to open it on unlock.
         std::fs::remove_file(&path).unwrap();
         assert!(relock_target(&path).is_none());
+    }
+}
+#[cfg(test)]
+mod new_file_warning {
+    use crate::config::StashKey;
+
+    /// A new file's unsaved text can only be protected across a lock if
+    /// a fixed stash key is configured — the file itself has no key
+    /// until it is first saved. That is exactly the condition the
+    /// warning fires on, so it is worth pinning: getting it backwards
+    /// would either nag people who are safe or stay silent for the ones
+    /// who are not.
+    #[test]
+    fn a_fixed_key_is_what_makes_a_new_file_safe() {
+        // Nothing configured: no key, so no protection.
+        let off = StashKey::default();
+        assert!(
+            off.fixed_recipient().is_none(),
+            "an unconfigured stash key protects nothing"
+        );
+
+        // A key filled in but the toggle left off is still off — the
+        // checkbox is the switch, not the presence of text.
+        let filled_but_disabled = StashKey {
+            use_fixed: false,
+            age_recipient: "age1abc".into(),
+            ..Default::default()
+        };
+        assert!(filled_but_disabled.fixed_recipient().is_none());
+
+        // Enabled with an age recipient: protected.
+        let age = StashKey {
+            use_fixed: true,
+            age_recipient: "age1abc".into(),
+            ..Default::default()
+        };
+        assert!(age.fixed_recipient().is_some());
+
+        // Enabled with a GPG fingerprint: also protected.
+        let gpg = StashKey {
+            use_fixed: true,
+            key_fingerprint: "DEADBEEF".into(),
+            ..Default::default()
+        };
+        assert!(gpg.fixed_recipient().is_some());
+
+        // Enabled but blank protects nothing, and must not be mistaken
+        // for protection just because the toggle is on.
+        let blank = StashKey {
+            use_fixed: true,
+            ..Default::default()
+        };
+        assert!(
+            blank.fixed_recipient().is_none(),
+            "an enabled but empty stash key is still no key"
+        );
     }
 }

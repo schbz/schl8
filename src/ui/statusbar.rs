@@ -109,6 +109,11 @@ pub fn render(
     // True when unsaved edits are deferring auto-lock/sleep-lock — shows
     // a warning chip explaining that the text is kept but unprotected.
     lock_deferred: bool,
+    // True when those edits could not be encrypted into the lock stash
+    // even if asked — a file with no key of its own, which has not been
+    // saved yet. A stronger chip replaces the deferral one, whose copy
+    // would otherwise promise a protection that is not there.
+    unsaved_unprotected: bool,
     // Hash + mtime of the encrypted file on disk (None for unsaved files).
     stamp: Option<&FileStamp>,
     // Two-row layout, decided by the caller so the panel height matches.
@@ -185,8 +190,29 @@ pub fn render(
             );
         }
 
+        // Unsaved text with nothing to encrypt it to. Distinct from the
+        // deferral chip below, and mutually exclusive with it: that one
+        // says the edits are being kept, which is only true when there
+        // is a key to keep them with.
+        if unsaved_unprotected {
+            ui.label(
+                RichText::new(" UNPROTECTED ")
+                    .color(theme::contrast_text(theme::accent_red()))
+                    .background_color(theme::accent_red())
+                    .size(theme::FONT_SIZE_STATUS)
+                    .strong(),
+            )
+            .on_hover_text(
+                "This file has no key of its own yet, so unsaved text cannot be \
+                 encrypted into the lock stash. Auto-lock and sleep-lock stay \
+                 paused to protect it, but Lock Now would discard it. Save the \
+                 file, or set a stash key under Settings \u{203A} Security.",
+            );
+            ui.separator();
+        }
+
         // Unsaved-edits / auto-lock warning
-        if lock_deferred {
+        if lock_deferred && !unsaved_unprotected {
             ui.label(
                 RichText::new(" LOCK PAUSED ")
                     .color(theme::contrast_text(theme::accent_yellow()))
