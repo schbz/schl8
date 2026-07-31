@@ -50,7 +50,7 @@ global-hotkey = "0.6"
 
 # Finder "Open With" AppleEvent handling (same versions winit already uses)
 objc2 = "0.5"
-objc2-foundation = { version = "0.2", features = ["NSString"] }
+objc2-foundation = { version = "0.3", features = ["NSString"] }
 
 # CLI argument parsing
 clap = { version = "4", features = ["derive"] }
