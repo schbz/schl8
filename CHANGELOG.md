@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Nothing yet.
 
+## [1.0.4] - 2026-07-31
+
+### Fixed
+
+- **Typing after the quick-note hotkey went to the wrong app.** Pressing
+  the global hotkey opened the jot window but left the keystrokes behind
+  in whatever application you were already in, so the note you typed
+  landed in someone else's search box.
+
+  Three things have to happen for a hotkey-summoned window to receive
+  typing, and the hotkey path did none of them. macOS routes keystrokes
+  to the active *application*, so Schl8 has to come forward first — a
+  focused window inside a background app still watches you type
+  somewhere else. The jot's viewport then has to become the key window;
+  every other menu-bar action already asked for that, and this one never
+  did. Finally the text field takes the caret, and that request is now
+  repeated for a few frames rather than made once: the window is not key
+  on the frame it is created, so a single request arrives too early and
+  is dropped.
+
+  Verified against the real path — another app frontmost, hotkey pressed
+  — where Schl8 now comes forward with the caret in the field, and
+  without the fix the other app stays frontmost and keeps the typing.
+
 ## [1.0.3] - 2026-07-31
 
 ### Added

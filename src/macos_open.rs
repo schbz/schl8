@@ -270,6 +270,27 @@ pub fn drain_requests() -> Vec<PathBuf> {
         .unwrap_or_default()
 }
 
+/// Bring the app to the front, even from the background.
+///
+/// A menu-bar-resident app that is not frontmost cannot simply focus a
+/// window and expect keystrokes: macOS routes typing to whichever
+/// *application* is active, so a newly-focused window in a background
+/// app still watches the user type into the app they came from. Only
+/// `activateIgnoringOtherApps:` moves that.
+///
+/// This is the honest use of the flag — the user just pressed a global
+/// hotkey asking for this window, so stealing focus is what they asked
+/// for, not something done behind their back.
+pub fn activate_app() {
+    unsafe {
+        let app: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
+        if app.is_null() {
+            return;
+        }
+        let _: () = msg_send![app, activateIgnoringOtherApps: true];
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

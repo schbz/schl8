@@ -1487,6 +1487,7 @@ impl App {
             .filter(|n| self.cached_exists(&n.source))
             .map(|n| (n.name.clone(), n.source.clone()))
             .collect();
+        let wants_focus = self.jot.wants_focus();
         let jot = &mut self.jot;
         let mut action = quicknote::JotAction::None;
         let mut seen_rect: Option<(egui::Pos2, egui::Vec2)> = None;
@@ -1495,6 +1496,23 @@ impl App {
             egui::ViewportId::from_hash_of("schl8_jot"),
             builder,
             |vctx, _class| {
+                // Take keyboard focus while the jot is asking for it.
+                //
+                // Three separate things have to happen, and the hotkey
+                // path was doing none of them: the *application* must
+                // come forward (macOS routes typing to the active app,
+                // so a focused window in a background app still watches
+                // you type into the app you came from), this *viewport*
+                // must become the key window, and the text field must
+                // take the caret. The first two are repeated for the few
+                // frames the jot asks for, because the window is not key
+                // on the frame it is created and a single request would
+                // land nowhere.
+                if wants_focus {
+                    crate::macos_open::activate_app();
+                    vctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                }
+
                 // Track live geometry so it can be persisted on close.
                 vctx.input(|i| {
                     let vp = i.viewport();

@@ -32,8 +32,15 @@ pub struct JotWindow {
     pub status: Option<String>,
     /// True while a background append is running.
     pub busy: bool,
-    /// Focus the text box on the next frame (set when opening).
-    want_focus: bool,
+    /// Frames left to keep asking for keyboard focus.
+    ///
+    /// A single request on the first frame is not enough. The window is
+    /// created and focused by the OS asynchronously, so on that frame it
+    /// is often not the key window yet and the request is dropped —
+    /// leaving the caret nowhere and the user's typing going to the app
+    /// they came from. Re-asking for a few frames costs nothing and
+    /// survives that race.
+    focus_frames: u8,
 }
 
 impl JotWindow {
@@ -45,7 +52,7 @@ impl JotWindow {
             selected_target: cfg.last_target.clone(),
             status: None,
             busy: false,
-            want_focus: false,
+            focus_frames: 0,
         }
     }
 
@@ -53,7 +60,15 @@ impl JotWindow {
     pub fn show(&mut self) {
         self.open = true;
         self.status = None;
-        self.want_focus = true;
+        // ~8 frames is a few dozen milliseconds at any refresh rate:
+        // long enough for the window to become key, short enough that it
+        // cannot fight a deliberate click into another field.
+        self.focus_frames = 8;
+    }
+
+    /// True while the jot is still trying to take keyboard focus.
+    pub fn wants_focus(&self) -> bool {
+        self.focus_frames > 0
     }
 
     pub fn text(&self) -> &str {
@@ -239,7 +254,7 @@ impl JotWindow {
         // Fills the space between the header rows above and the fixed
         // rows below (options + actions ≈ 74 px), scrolling when the
         // text outgrows it — long pastes stay reachable.
-        let want_focus = self.want_focus;
+        let want_focus = self.focus_frames > 0;
         let text_height = (ui.available_height() - 74.0).max(90.0);
         ui.add_enabled_ui(!self.busy, |ui| {
             ui.visuals_mut().extreme_bg_color = theme::bg_editor();
@@ -267,7 +282,7 @@ impl JotWindow {
                     }
                 });
         });
-        self.want_focus = false;
+        self.focus_frames = self.focus_frames.saturating_sub(1);
 
         // ── Options + status ─────────────────────────────────────────
         ui.horizontal(|ui| {
