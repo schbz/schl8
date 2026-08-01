@@ -20,7 +20,7 @@ jobs:
     outputs:
       version: ${{ steps.v.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: v
         name: Compare tag with Cargo.toml
         run: |
@@ -52,7 +52,7 @@ jobs:
       HAS_CERT: ${{ secrets.APPLE_CERT_P12 != '' }}
       HAS_NOTARY: ${{ secrets.APPLE_ID != '' && secrets.APPLE_TEAM_ID != '' && secrets.APPLE_APP_PASSWORD != '' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust targets
         run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
@@ -126,7 +126,7 @@ jobs:
             Schl8-${{ github.ref_name }}-macos-universal.zip
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: schl8-app
           path: Schl8-${{ github.ref_name }}-macos-universal.zip
@@ -141,7 +141,7 @@ jobs:
         target: [aarch64-apple-darwin, x86_64-apple-darwin]
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust toolchain
         run: rustup target add ${{ matrix.target }}
@@ -158,7 +158,7 @@ jobs:
           tar czf ../../../schl8-${{ github.ref_name }}-${{ matrix.target }}.tar.gz schl8
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: schl8-${{ matrix.target }}
           path: schl8-${{ github.ref_name }}-${{ matrix.target }}.tar.gz
@@ -168,10 +168,10 @@ jobs:
     needs: [check-version, app-bundle, cli-binaries]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
 
       # Checksums matter more than usual for a tool that handles secrets:
       # they let someone confirm a download is the artifact this workflow
@@ -236,7 +236,7 @@ jobs:
           cat /tmp/body.md
 
       - name: Create draft release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           # Draft, because a published release's assets cannot be
           # replaced — this is the last chance to check them.
