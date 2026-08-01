@@ -48,7 +48,7 @@ jobs:
   build:
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust targets
         run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
@@ -153,7 +153,7 @@ jobs:
           cat /tmp/nightly.md
 
       - name: Publish the nightly
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: nightly
           target_commitish: ${{ github.sha }}
