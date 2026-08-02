@@ -31,6 +31,7 @@ you'd rather see it laid out than read a long file.
 - [First five minutes](#first-five-minutes)
 - [Features in depth](#features-in-depth)
   - [Opening and reading](#opening-and-reading)
+  - [File fingerprints — noticing when something changed](#file-fingerprints--noticing-when-something-changed)
   - [Editing, encrypting, saving](#editing-encrypting-saving)
   - [Quick Note — capture without opening anything](#quick-note--capture-without-opening-anything)
   - [Favorites](#favorites)
@@ -247,10 +248,58 @@ Open With → Schl8. Files can also be dragged onto the window.
 signer on hover, and flags a bad or unverifiable signature rather than
 quietly rendering it.
 
-**File identity at a glance.** The status bar shows the encrypted file's short
-SHA-256 and its last-modified time; hover the filename for the absolute path.
-Useful when several near-identical backups exist and you need to know which
-copy you're looking at.
+**File identity at a glance.** The status bar shows the encrypted file's
+fingerprint (below) and its last-modified time; hover the filename for the
+absolute path. Useful when several near-identical backups exist and you need to
+know which copy you're looking at.
+
+### File fingerprints — noticing when something changed
+
+Eight hex digits are precise and nearly useless to a human eye. Nobody
+remembers `dfdc256a`, so nobody notices when it quietly becomes `9e805359` —
+and noticing is the point.
+
+So the hash is **drawn** instead of printed — in the status bar, and inside
+every file card on the home screen. Each file gets a small **circuit**: six
+nodes placed by digest bytes and joined in sequence by right-angle traces, the
+way tracks are routed on a board. Each node is either a square pad or a round
+star — its own byte decides — and every element takes its hue from the byte
+that placed it.
+
+The identity lives in three channels at once: where the nodes sit, which of
+them are square, and what colour everything is. The first two survive with all
+colour removed, so the mark still works for the roughly one man in twelve with
+a colour-vision deficiency, and on a washed-out projector. The background is
+transparent — the circuit sits directly on the theme's own surface — and the
+colours are generated in OKLCH at a fixed lightness and chroma, which is why
+they stay readable on all sixteen themes instead of coming out muddy on one
+and glaring on another.
+
+Because SHA-256 avalanches, one changed byte anywhere in the file redraws the
+whole thing. A file you've worked in for a month looks like itself; the moment
+it doesn't, you can tell without reading a single digit.
+
+**Hovering** gives you the full 64-character digest, a spoken three-word name
+for the file (`golden-elm-folds`), and a sentence explaining what it is. The
+name is a memory aid and a way to check a file against someone over the phone —
+the full hex is the comparison of record.
+
+**And Schl8 tells you outright.** It remembers what each file hashed to the
+last time you opened it, so it doesn't depend on you noticing that a small
+picture looks different: a file that changed since your last visit gets a
+`⚠ changed` marker in the status bar, and the tooltip says what it was before.
+Your own saves don't trigger it — only a change that happened while you weren't
+looking. That's the case worth knowing about: a sync client that resolved a
+conflict, another machine writing to a shared destination, or a save plan that
+isn't doing what you thought.
+
+> **What it's for.** Confirming the note you just opened is the one you left.
+> Spotting that a backup destination has drifted from your working copy.
+> Checking two machines hold the same file without squinting at hex.
+
+None of this touches plaintext: the hash is of the **ciphertext** on disk, so
+every byte it draws is something any observer of the encrypted file could
+compute themselves.
 
 **Recent files and stats.** The picker lists recent files with sizes and dates.
 View → Statistics adds a live word/character/line card while you read or write.
@@ -634,7 +683,10 @@ panic_lock = "ctrl+cmd+l"
 ```
 
 Also stored, and managed through the GUI rather than by hand: `save_plans`,
-`age_recipients`, `favorites`, and `recent_files`.
+`age_recipients`, `favorites`, `recent_files`, and `seen_files` — the last
+being the remembered fingerprint of each file you have opened (a path and a
+hash of the ciphertext, up to 200 entries), which is what lets Schl8 tell you
+when one changed while you weren't looking.
 
 The config file stores paths, templates, and preferences only — **never
 document content or key material**. The window is always fully opaque;

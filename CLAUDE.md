@@ -39,7 +39,9 @@ contributors.
   detection (double extension: `.md.gpg`).
 - `src/ui/` — viewer, markdown renderer, filetree sidebar, quicknote window,
   dialogs, menu, statusbar, keybindings, theme, `favorites_manager.rs`,
-  `stamp.rs` (cached on-disk hash/size), `textnav.rs` (line/search math),
+  `stamp.rs` (cached on-disk hash/size), `fingerprint.rs` (the digest
+  drawn as a recognisable circuit glyph, plus the spoken-name wordlists
+  — frozen like the AGE salt), `textnav.rs` (line/search math),
   `agent_help.rs` (copyable agent briefings — now two entry points plus
   a list of setup suggestions — and the AGENT-GUIDE fallback it writes
   into the config dir), `crawl.rs` (animated reading — the motion is

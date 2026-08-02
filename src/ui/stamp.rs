@@ -1,5 +1,5 @@
-//! Cached on-disk identity (short hash + mtime) of encrypted files, for
-//! the status bar and the picker's recents list.
+//! Cached on-disk identity (SHA-256 + mtime) of encrypted files, for the
+//! status bar and the picker's recents list.
 //!
 //! SECURITY: the hash covers the **ciphertext** bytes on disk. No
 //! plaintext is read, decrypted, or hashed here, and nothing derived from
@@ -15,7 +15,7 @@ use std::time::SystemTime;
 
 use super::statusbar::FileStamp;
 
-/// Hash + formatted mtime of the encrypted file at `path`.
+/// Digest + formatted mtime of the encrypted file at `path`.
 ///
 /// `None` when the file can't be read — callers show the entry dimmed
 /// rather than treating it as an error.
@@ -23,7 +23,8 @@ pub fn compute_stamp(path: &Path, mtime: SystemTime) -> Option<FileStamp> {
     use sha2::Digest;
     let bytes = std::fs::read(path).ok()?;
     let digest = sha2::Sha256::digest(&bytes);
-    let hash8: String = digest.iter().take(4).map(|b| format!("{b:02x}")).collect();
+    let mut full = [0u8; 32];
+    full.copy_from_slice(&digest);
     let modified = chrono::DateTime::<chrono::Local>::from(mtime)
         .format("%Y-%m-%d %H:%M")
         .to_string();
@@ -31,10 +32,25 @@ pub fn compute_stamp(path: &Path, mtime: SystemTime) -> Option<FileStamp> {
     // nothing extra — no second stat, and it stays consistent with the
     // hash even if the file changes between calls.
     Some(FileStamp {
-        hash8,
         modified,
         bytes: bytes.len() as u64,
+        digest: full,
     })
+}
+
+/// The SHA-256 of the encrypted file at `path`, as lowercase hex.
+///
+/// Separate from [`compute_stamp`] because the change-detection path
+/// wants only the digest and runs once per open or save, not per frame.
+pub fn digest_hex(path: &Path) -> Option<String> {
+    use sha2::Digest;
+    let bytes = std::fs::read(path).ok()?;
+    Some(
+        sha2::Sha256::digest(&bytes)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect(),
+    )
 }
 
 /// Single-file stamp cache for the open document's status bar.
@@ -99,14 +115,13 @@ mod tests {
 
         let mtime = std::fs::metadata(&a).unwrap().modified().unwrap();
         let s1 = compute_stamp(&a, mtime).expect("stamp");
-        assert_eq!(s1.hash8.len(), 8, "4 bytes of SHA-256 as hex");
-        assert!(s1.hash8.chars().all(|c| c.is_ascii_hexdigit()));
+        assert_ne!(s1.digest, [0u8; 32], "a real digest, not a default");
 
         // Same bytes hash the same regardless of path; different bytes don't.
         let s2 = compute_stamp(&b, mtime).unwrap();
-        assert_eq!(s1.hash8, s2.hash8);
+        assert_eq!(s1.digest, s2.digest);
         std::fs::write(&b, b"different ciphertext").unwrap();
-        assert_ne!(s1.hash8, compute_stamp(&b, mtime).unwrap().hash8);
+        assert_ne!(s1.digest, compute_stamp(&b, mtime).unwrap().digest);
 
         // A file that isn't there has no stamp.
         assert!(compute_stamp(&dir.join("missing.gpg"), mtime).is_none());
@@ -122,13 +137,13 @@ mod tests {
 
         let mut cache = FileStampCache::default();
         let before = cache.get(&f).expect("stamp");
-        assert_eq!(cache.get(&f).unwrap().hash8, before.hash8, "cached");
+        assert_eq!(cache.get(&f).unwrap().digest, before.digest, "cached");
 
         // A rewrite must be picked up, not served from the cache — the
         // status bar showing a stale hash would misreport what's on disk.
         std::thread::sleep(std::time::Duration::from_millis(20));
         std::fs::write(&f, b"second").unwrap();
-        assert_ne!(cache.get(&f).unwrap().hash8, before.hash8);
+        assert_ne!(cache.get(&f).unwrap().digest, before.digest);
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -144,14 +159,14 @@ mod tests {
         let mut stamps = RecentStamps::default();
         let sa = stamps.get(&a).expect("a");
         let sb = stamps.get(&b).expect("b");
-        assert_ne!(sa.hash8, sb.hash8, "entries don't share a cache slot");
-        assert_eq!(stamps.get(&a).unwrap().hash8, sa.hash8);
+        assert_ne!(sa.digest, sb.digest, "entries don't share a cache slot");
+        assert_eq!(stamps.get(&a).unwrap().digest, sa.digest);
 
         // Editing one entry must not disturb the other's cached stamp.
         std::thread::sleep(std::time::Duration::from_millis(20));
         std::fs::write(&a, b"aaa-changed").unwrap();
-        assert_ne!(stamps.get(&a).unwrap().hash8, sa.hash8);
-        assert_eq!(stamps.get(&b).unwrap().hash8, sb.hash8);
+        assert_ne!(stamps.get(&a).unwrap().digest, sa.digest);
+        assert_eq!(stamps.get(&b).unwrap().digest, sb.digest);
 
         // A recent whose file was deleted: None, and no panic.
         std::fs::remove_file(&b).unwrap();

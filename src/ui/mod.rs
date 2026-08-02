@@ -4,6 +4,7 @@ pub mod crawl;
 pub mod dialogs;
 pub mod favorites_manager;
 pub mod filetree;
+pub mod fingerprint;
 pub mod highlight;
 pub mod keybindings;
 pub mod markdown;

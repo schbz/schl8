@@ -645,6 +645,32 @@ pub struct RecentFile {
     pub last_opened: String,
 }
 
+/// Files whose on-disk fingerprint is remembered between sessions.
+///
+/// Deliberately larger than [`MAX_RECENTS`]: the point is to notice a
+/// change in a file you come back to every few weeks, and a ten-entry
+/// window would have forgotten it long before you returned.
+pub const MAX_REMEMBERED: usize = 200;
+
+/// What a file's ciphertext hashed to the last time it was opened.
+///
+/// This is what lets Schl8 say "this changed since you last looked"
+/// rather than leaving you to notice that a small picture is different.
+///
+/// Only a path and a hash of the *ciphertext* — the same public
+/// information already shown in the status bar. It does add to the map
+/// of which files you use, which is the thing `config_backup` offers to
+/// encrypt; nothing here is derived from decrypted content.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SeenFile {
+    pub path: PathBuf,
+    /// Full SHA-256 of the encrypted file, lowercase hex.
+    pub digest: String,
+    /// RFC3339 timestamp of when that digest was recorded.
+    pub seen: String,
+}
+
 /// A stored age recipient public key (`age1…`) — the age equivalent of a
 /// GPG public key, usable as an encryption identity. Public, non-secret;
 /// persisted so it survives restarts, like the GPG keyring.
@@ -680,6 +706,8 @@ pub struct Config {
     pub favorites: Vec<Favorite>,
     /// Animated reading mode.
     pub crawl: CrawlSection,
+    /// Remembered on-disk fingerprints, most recently seen first.
+    pub seen_files: Vec<SeenFile>,
 }
 
 /// Where the config file lives: `$XDG_CONFIG_HOME/schl8/config.toml`
@@ -855,6 +883,55 @@ impl Config {
     /// whose file no longer exists).
     pub fn remove_recent(&mut self, path: &Path) {
         self.recent_files.retain(|r| r.path != path);
+        // The entry is removed because the file is gone, so its
+        // remembered fingerprint describes nothing and would otherwise
+        // sit in the config forever.
+        self.forget_digest(path);
+    }
+
+    /// What this file's ciphertext hashed to when it was last opened.
+    pub fn remembered_digest(&self, path: &Path) -> Option<&str> {
+        self.seen_files
+            .iter()
+            .find(|s| s.path == path)
+            .map(|s| s.digest.as_str())
+    }
+
+    /// Record what `path` hashes to now, and report what it hashed to
+    /// before **if that was different**.
+    ///
+    /// Recording and comparing are one call on purpose. Two calls invite
+    /// the bug where a caller compares, forgets to record, and warns
+    /// about the same change on every open forever.
+    ///
+    /// A first sighting returns `None`: a file Schl8 has never seen
+    /// cannot have changed, and greeting a new file with a change
+    /// warning would teach people to ignore the warning.
+    pub fn remember_digest(&mut self, path: &Path, digest: &str) -> Option<String> {
+        if !path.is_absolute() || digest.len() != 64 {
+            return None;
+        }
+        let previous = self
+            .seen_files
+            .iter()
+            .position(|s| s.path == path)
+            .map(|i| self.seen_files.remove(i).digest)
+            .filter(|d| d != digest);
+        self.seen_files.insert(
+            0,
+            SeenFile {
+                path: path.to_path_buf(),
+                digest: digest.to_string(),
+                seen: chrono::Local::now().to_rfc3339(),
+            },
+        );
+        self.seen_files.truncate(MAX_REMEMBERED);
+        previous
+    }
+
+    /// Forget a file's fingerprint (used when its entry is removed).
+    pub fn forget_digest(&mut self, path: &Path) {
+        self.seen_files.retain(|s| s.path != path);
     }
 
     /// Add an age recipient (deduplicated by recipient string). Returns
@@ -1400,5 +1477,104 @@ mod age_lock_tests {
         let toml = toml::to_string_pretty(&cfg).unwrap();
         let back: Config = toml::from_str(&toml).unwrap();
         assert_eq!(back.age_lock, cfg.age_lock);
+    }
+}
+
+/// Remembering what a file's ciphertext hashed to last time, so a
+/// change can be reported rather than left to be noticed.
+#[cfg(test)]
+mod fingerprint_memory_tests {
+    use super::*;
+
+    // ── Remembered fingerprints ──────────────────────────────────────
+
+    const A: &str = "dfdc256a5219be4354e6f3c63e18a9c235a0f6fc3648288efcb04009c808f2a1";
+    const B: &str = "9e805359ea4af972ec1a5ac8d55c73e475d13fdd504e1ec719415e9f9063b59b";
+
+    /// A file Schl8 has never seen cannot have changed. Greeting every
+    /// new file with a change warning is how a warning gets ignored.
+    #[test]
+    fn a_first_sighting_is_not_a_change() {
+        let mut cfg = Config::default();
+        let p = Path::new("/tmp/notes/first.md.gpg");
+        assert_eq!(cfg.remember_digest(p, A), None);
+        assert_eq!(cfg.remembered_digest(p), Some(A));
+    }
+
+    /// Reopening an untouched file must stay silent, however many times.
+    #[test]
+    fn reopening_an_untouched_file_reports_nothing() {
+        let mut cfg = Config::default();
+        let p = Path::new("/tmp/notes/steady.md.gpg");
+        cfg.remember_digest(p, A);
+        for _ in 0..5 {
+            assert_eq!(cfg.remember_digest(p, A), None);
+        }
+        assert_eq!(cfg.seen_files.len(), 1, "no duplicate entries per path");
+    }
+
+    /// The case the feature exists for — and it must report the change
+    /// exactly once, then treat the new digest as the baseline. A second
+    /// report would nag about a change the user has already been told of.
+    #[test]
+    fn a_changed_file_is_reported_once_then_becomes_the_baseline() {
+        let mut cfg = Config::default();
+        let p = Path::new("/tmp/notes/changed.md.gpg");
+        cfg.remember_digest(p, A);
+        assert_eq!(cfg.remember_digest(p, B).as_deref(), Some(A));
+        assert_eq!(cfg.remember_digest(p, B), None, "reported twice");
+    }
+
+    /// Files are tracked independently: editing one must not make
+    /// another look changed.
+    #[test]
+    fn files_do_not_contaminate_each_other() {
+        let mut cfg = Config::default();
+        let (x, y) = (Path::new("/tmp/a.gpg"), Path::new("/tmp/b.gpg"));
+        cfg.remember_digest(x, A);
+        cfg.remember_digest(y, A);
+        assert_eq!(cfg.remember_digest(x, B).as_deref(), Some(A));
+        assert_eq!(cfg.remember_digest(y, A), None, "y was never touched");
+    }
+
+    #[test]
+    fn the_list_is_capped_and_keeps_the_most_recent() {
+        let mut cfg = Config::default();
+        for i in 0..(MAX_REMEMBERED + 25) {
+            cfg.remember_digest(&PathBuf::from(format!("/tmp/n{i}.gpg")), A);
+        }
+        assert_eq!(cfg.seen_files.len(), MAX_REMEMBERED);
+        let newest = format!("/tmp/n{}.gpg", MAX_REMEMBERED + 24);
+        assert_eq!(cfg.seen_files[0].path, PathBuf::from(newest));
+    }
+
+    /// Junk in must not be recorded: a truncated or non-hex digest would
+    /// make every subsequent open look like a change.
+    #[test]
+    fn malformed_digests_are_refused() {
+        let mut cfg = Config::default();
+        let p = Path::new("/tmp/notes/junk.md.gpg");
+        cfg.remember_digest(p, "deadbeef");
+        cfg.remember_digest(Path::new("relative.gpg"), A);
+        assert!(cfg.seen_files.is_empty());
+    }
+
+    /// Clearing a dead recent entry takes its fingerprint with it.
+    #[test]
+    fn removing_a_recent_entry_forgets_its_fingerprint() {
+        let mut cfg = Config::default();
+        let p = Path::new("/tmp/notes/gone.md.gpg");
+        cfg.add_recent(p);
+        cfg.remember_digest(p, A);
+        cfg.remove_recent(p);
+        assert_eq!(cfg.remembered_digest(p), None);
+    }
+
+    #[test]
+    fn remembered_fingerprints_survive_a_config_round_trip() {
+        let mut cfg = Config::default();
+        cfg.remember_digest(Path::new("/tmp/notes/rt.md.gpg"), A);
+        let back: Config = toml::from_str(&toml::to_string_pretty(&cfg).unwrap()).unwrap();
+        assert_eq!(back.seen_files, cfg.seen_files);
     }
 }

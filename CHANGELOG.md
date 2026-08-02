@@ -7,7 +7,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Documentation and repository work only — no change to the program itself.
+## [1.0.41] - 2026-08-01
+
+### Added
+
+- **File fingerprints.** Every hash is now drawn instead of printed —
+  in the status bar, and inside every picker and quicknote card. Eight
+  hex digits are precise and nearly useless to a human eye: nobody
+  remembers `dfdc256a`, so nobody notices when it becomes `9e805359`,
+  and noticing is the point.
+
+  The mark is a small **circuit**: six nodes placed by digest bytes,
+  joined in sequence by right-angle traces the way tracks are routed on
+  a board, each node a square pad or a round star as its own byte
+  decides. Identity lives in three channels at once — position, shape,
+  colour — and the first two survive with all colour removed, so the
+  mark still works for the roughly one man in twelve with a
+  colour-vision deficiency, and on a washed-out projector. The
+  background is transparent, so one design serves every theme; colours
+  are generated in OKLCH at fixed lightness and chroma rather than from
+  raw RGB bytes, and a test checks every one of the 256 hues clears the
+  worst-case background of both theme families.
+
+  Hovering gives the full 64-character digest, a spoken three-word name
+  for the file (`golden-elm-folds`) for saying aloud or checking with
+  someone on the phone, and a sentence explaining what any of it means.
+
+- **Schl8 now says when a file changed while you weren't looking.**
+  It remembers what each file's ciphertext hashed to when you last
+  opened it — up to 200 files — and flags a difference in the status
+  bar, with the previous fingerprint in the tooltip. Relying on someone
+  to notice that a small picture looks different is relying on luck.
+
+  Your own saves never trigger it, and a file Schl8 has never seen
+  before is not a change: both would train people to dismiss the
+  warning. It catches the case worth catching — a sync client that
+  resolved a conflict, another machine writing to a shared
+  destination, or a save plan doing something other than you thought.
+
+### Changed
+
+- **The hex badge is gone from the status bar.** The fingerprint is what
+  gets recognised at a glance, and the only moment anyone wants digits
+  is the moment they are comparing them — at which point they want all
+  sixty-four, which is what hovering gives. Eight of them sitting there
+  permanently was noise.
+- `FileStamp` now carries the whole 32-byte digest instead of the four
+  bytes behind the old `hash8` field. The picture is drawn from all of
+  it: at four bytes, two unrelated files sharing a prefix would have
+  drawn as the same fingerprint. Short forms are derived from the digest
+  where needed, so there is no second copy to fall out of step.
+
+### Fixed
+
+- **The home screen's two lists overlapped in a narrow window.** Each
+  card enforces a minimum width, so once half the window dropped below
+  it, Recent's cards ran into the Quick Notes column. Below 520 points
+  the lists now stack vertically instead, each card getting the full
+  width, in one shared scroll.
+- **The jot window's "esc" did nothing when clicked.** It looked like a
+  control and behaved like a caption: the title-bar drag handle is added
+  after the header, so it sat on top and swallowed the click, leaving
+  the physical Esc key as the only way to close the window. It is now a
+  real control, and the drag handle cuts its rect out.
+
+Nothing here reads plaintext. The hash covers the **ciphertext** on
+disk, so every byte drawn is something any observer of the encrypted
+file could compute themselves.
+
+## [1.0.4] - 2026-07-31 — documentation and repository work
 
 ### Added
 

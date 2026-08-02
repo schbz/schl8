@@ -1,5 +1,6 @@
 use egui::{Align, Layout, RichText, Ui};
 
+use super::fingerprint::{self, Fingerprint};
 use super::theme;
 use crate::crypto::gpg::SignatureStatus;
 
@@ -20,16 +21,23 @@ pub enum StatusAction {
 }
 
 /// On-disk identity of the opened encrypted file, shown at the left of
-/// the bar: (short content hash, last-modified timestamp, size).
+/// the bar as a drawn fingerprint plus its last-modified time.
 ///
 /// Every field describes the *ciphertext* on disk — nothing here is
 /// derived from decrypted content.
 #[derive(Clone)]
 pub struct FileStamp {
-    pub hash8: String,
     pub modified: String,
     /// Size of the encrypted file in bytes.
     pub bytes: u64,
+    /// The whole SHA-256 of the ciphertext.
+    ///
+    /// Kept entire rather than truncated: the fingerprint is drawn from
+    /// all of it, and two unrelated files sharing a four-byte prefix
+    /// would otherwise draw as the same mark — the one thing it must
+    /// never do. Short forms are derived from here when needed, so there
+    /// is no second copy to fall out of step with this one.
+    pub digest: [u8; 32],
 }
 
 impl FileStamp {
@@ -114,8 +122,12 @@ pub fn render(
     // saved yet. A stronger chip replaces the deferral one, whose copy
     // would otherwise promise a protection that is not there.
     unsaved_unprotected: bool,
-    // Hash + mtime of the encrypted file on disk (None for unsaved files).
+    // Digest + mtime of the encrypted file on disk (None when unsaved).
     stamp: Option<&FileStamp>,
+    // The digest recorded the last time this file was opened, when one
+    // was recorded and it differs from what is on disk now. Some(_) is
+    // the interesting case: the file changed while you weren't looking.
+    previous: Option<&Fingerprint>,
     // Two-row layout, decided by the caller so the panel height matches.
     compact: bool,
 ) -> Option<StatusAction> {
@@ -125,26 +137,40 @@ pub fn render(
     // the same row as the file info; narrow ones give the buttons their
     // own row above, and let the info wrap, so nothing is ever clipped.
     let draw_info = |ui: &mut Ui| {
-        // On-disk identity: short content hash + last-modified time of
-        // the encrypted file.
+        // On-disk identity: the drawn fingerprint plus the last-modified
+        // time of the encrypted file.
         //
         // An unsaved file has no on-disk identity, and nothing goes in
         // its place: the app's name is already in the title bar, and this
         // bar is for facts about the file in front of you.
         if let Some(s) = stamp {
-            ui.label(
-                RichText::new(format!(" #{} ", s.hash8))
-                    .color(theme::badge_text())
-                    .background_color(theme::badge_bg())
-                    .size(theme::FONT_SIZE_STATUS)
-                    .monospace()
-                    .strong(),
-            )
-            .on_hover_text(
-                "SHA-256 (first 8 hex digits) of the encrypted file on disk \
-                 — compare it across machines to confirm you're looking at \
-                 the same version",
-            );
+            // The fingerprint is the whole of it. A hex badge used to
+            // sit beside it; it was noise, because the only moment
+            // anyone wants digits is the moment they are comparing
+            // them — and then they want all sixty-four, which is what
+            // hovering gives.
+            let fp = Fingerprint::new(s.digest);
+            let hint = fingerprint::tooltip(&fp, previous);
+            fingerprint::paint(ui, &fp, fingerprint::default_height()).on_hover_text(&hint);
+
+            // A file that changed since it was last opened says so in
+            // the bar itself. Relying on someone noticing that a small
+            // picture looks different would be relying on luck.
+            if previous.is_some() {
+                ui.label(
+                    RichText::new(" \u{26A0} changed ")
+                        .color(theme::badge_text())
+                        .background_color(theme::accent_yellow())
+                        .size(theme::FONT_SIZE_STATUS)
+                        .strong(),
+                )
+                .on_hover_text(&hint);
+            }
+
+            // No hex badge here any more. The fingerprint is the thing
+            // that gets recognised at a glance, and the digits it stood
+            // for — all sixty-four of them — are one hover away, which
+            // is the only time anyone actually wants them.
             ui.label(
                 RichText::new(&s.modified)
                     .color(theme::text_dim())
@@ -518,9 +544,9 @@ mod tests {
     #[test]
     fn stamp_exposes_its_own_size_label() {
         let stamp = FileStamp {
-            hash8: "deadbeef".into(),
             modified: "2026-07-27 09:00".into(),
             bytes: 2048,
+            digest: [0u8; 32],
         };
         assert_eq!(stamp.size_label(), "2 KB");
     }

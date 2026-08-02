@@ -196,6 +196,10 @@ pub struct App {
     stats_cache: crate::document::stats::StatsCache,
     /// Cache of the opened file's on-disk hash + mtime for the status bar.
     file_stamp: FileStampCache,
+    /// The fingerprint this file had when it was last opened, when
+    /// that differs from what is on disk now. Held for as long as the
+    /// document stays open, so the status bar can keep saying so.
+    fingerprint_changed: Option<crate::ui::fingerprint::Fingerprint>,
     /// Whether a usable `gpg` binary was found at startup. When false the
     /// app runs in age-only mode: GPG UI is hidden/disabled and Encrypt &
     /// Save defaults to age.
@@ -321,6 +325,7 @@ impl App {
             last_activity: None,
             stats_cache: crate::document::stats::StatsCache::default(),
             file_stamp: FileStampCache::default(),
+            fingerprint_changed: None,
             recent_stamps: RecentStamps::default(),
             gpg_available: crate::crypto::gpg::gpg_available(),
             gpg_hint_pending: !crate::crypto::gpg::gpg_available(),
@@ -1829,7 +1834,7 @@ impl App {
             };
             // Our write is now the version of record.
             if let Some(source) = &source {
-                self.remember_source_identity(source);
+                self.remember_source_identity(source, false);
             }
             if let Some(source) = source {
                 let dests = plan
@@ -2105,7 +2110,7 @@ impl App {
                 let lines_count = count_lines(&doc.content);
                 self.config.add_recent(&doc.source_path);
                 let _ = self.config.save();
-                self.remember_source_identity(&doc.source_path);
+                self.remember_source_identity(&doc.source_path, true);
                 self.state = State::Viewing {
                     doc,
                     scroll_offset: 0.0,
@@ -2140,7 +2145,7 @@ impl App {
                     .unwrap_or(0);
                 self.config.add_recent(&archive.source_path);
                 let _ = self.config.save();
-                self.remember_source_identity(&archive.source_path);
+                self.remember_source_identity(&archive.source_path, true);
                 self.state = State::ViewingArchive {
                     archive,
                     tree,
@@ -2594,9 +2599,33 @@ impl App {
 
     /// Record the on-disk identity of `path` as the version Schl8 is
     /// working from. Called after a load and after every successful write.
-    fn remember_source_identity(&mut self, path: &std::path::Path) {
+    ///
+    /// `opening` separates the two cases that look identical to the
+    /// filesystem and could not be more different to the user. Opening a
+    /// file whose hash moved since last time is worth interrupting them
+    /// for; a hash that moved because they just pressed Save is not, and
+    /// warning about it would train them to dismiss the warning.
+    fn remember_source_identity(&mut self, path: &std::path::Path, opening: bool) {
         self.source_identity =
             file_identity(path).map(|(len, mtime)| (path.to_path_buf(), len, mtime));
+
+        let Some(hex) = crate::ui::stamp::digest_hex(path) else {
+            // Unreadable (a debug sample, a file on a detached volume).
+            // Leave whatever was remembered alone rather than recording
+            // an absence as a change.
+            return;
+        };
+        let previous = self.config.remember_digest(path, &hex);
+        self.fingerprint_changed = if opening {
+            previous
+                .as_deref()
+                .and_then(crate::ui::fingerprint::Fingerprint::from_hex)
+        } else {
+            None
+        };
+        if previous.is_some() || opening {
+            let _ = self.config.save();
+        }
     }
 
     /// Whether `path` differs from the version Schl8 loaded or last
@@ -2767,7 +2796,7 @@ impl App {
             self.vault_prompt.set_error(format!("{e:#}"));
             return;
         }
-        self.remember_source_identity(&source);
+        self.remember_source_identity(&source, false);
         self.reload_archive_from_tar(rebuilt.tar.as_bytes(), ctx);
         self.show_toast("Vault updated".to_string(), false, ctx);
     }
@@ -2797,7 +2826,7 @@ impl App {
                     self.show_toast(format!("Delete failed: {e:#}"), true, ctx);
                     return;
                 }
-                self.remember_source_identity(&source);
+                self.remember_source_identity(&source, false);
                 // A folder delete may have removed the highlighted folder.
                 if let State::ViewingArchive { selected_dir, .. } = &mut self.state {
                     *selected_dir = None;
@@ -2959,7 +2988,7 @@ impl App {
                         "Schl8 \u{2014} {name}"
                     )));
                 }
-                self.remember_source_identity(&dest);
+                self.remember_source_identity(&dest, false);
                 self.config.add_recent(&dest);
                 let _ = self.config.save();
                 let _ = editing;
@@ -3675,7 +3704,7 @@ impl eframe::App for App {
             // Remember the on-disk version we just loaded, so a later save
             // can tell whether anything else has written the file since.
             if let Some(src) = self.current_source_path() {
-                self.remember_source_identity(&src);
+                self.remember_source_identity(&src, false);
             }
             // Record successful opens in the recents list (paths only).
             let opened = match &self.state {
@@ -4170,7 +4199,7 @@ impl eframe::App for App {
                             // Save As adopts a new file — that write is now
                             // the version of record for staleness checks.
                             if let Some(p) = adopted_source.take() {
-                                self.remember_source_identity(&p);
+                                self.remember_source_identity(&p, false);
                             }
                             // App-wide post-save hook (paths only).
                             crate::hooks::run_post_save(
@@ -4830,6 +4859,11 @@ impl eframe::App for App {
             State::ViewingArchive { archive, .. } => self.file_stamp.get(&archive.source_path),
             _ => None,
         };
+        // Recorded once when the document opened, not recomputed here:
+        // the moment the user saves, the file legitimately differs from
+        // what it was, and a per-frame comparison would start shouting
+        // about their own edit.
+        let fingerprint_changed = self.fingerprint_changed.as_ref();
 
         let view_opts = viewer::ViewOptions {
             word_wrap: self.config.appearance.word_wrap,
@@ -4890,6 +4924,7 @@ impl eframe::App for App {
                 chromeless,
                 keybindings::Layout::parse(&self.config.app.keyboard_layout),
                 stamp.as_ref(),
+                fingerprint_changed,
                 unsaved_unprotected,
                 view_opts,
                 &mut self.pending_jump,
@@ -4920,6 +4955,7 @@ impl eframe::App for App {
                 chromeless,
                 keybindings::Layout::parse(&self.config.app.keyboard_layout),
                 stamp.as_ref(),
+                fingerprint_changed,
                 unsaved_unprotected,
                 view_opts,
                 &mut self.pending_jump,
@@ -5202,8 +5238,25 @@ struct ListRow {
     /// chronological). Empty for files that are gone, which sort last.
     modified: String,
     stamp: Option<statusbar::FileStamp>,
+    /// What this file's fingerprint was last time it was opened, when
+    /// that differs from what is on disk now. Resolved here rather than
+    /// while drawing, because the row helper has no config to consult.
+    previous: Option<crate::ui::fingerprint::Fingerprint>,
     /// Offer a remove button (Recent entries whose file vanished).
     removable: bool,
+}
+
+/// The fingerprint a file had when it was last opened, if it has since
+/// changed. `None` covers every uninteresting case: a missing file, one
+/// Schl8 has never seen, and one that is exactly as it was left.
+fn previous_fingerprint(
+    config: &Config,
+    stamp: Option<&statusbar::FileStamp>,
+    path: &std::path::Path,
+) -> Option<crate::ui::fingerprint::Fingerprint> {
+    let now = crate::ui::fingerprint::Fingerprint::new(stamp?.digest).hex();
+    let was = config.remembered_digest(path)?;
+    (was != now).then(|| crate::ui::fingerprint::Fingerprint::from_hex(was))?
 }
 
 fn render_file_picker(
@@ -5266,6 +5319,7 @@ fn render_file_picker(
                     .as_ref()
                     .map(|s| s.modified.clone())
                     .unwrap_or_default(),
+                previous: previous_fingerprint(config, stamp.as_ref(), &r.path),
                 stamp,
                 path: r.path.clone(),
                 // Recent is a history list, so a dead entry is clutter the
@@ -5294,6 +5348,7 @@ fn render_file_picker(
                     .as_ref()
                     .map(|s| s.modified.clone())
                     .unwrap_or_default(),
+                previous: previous_fingerprint(config, stamp.as_ref(), &n.source),
                 stamp,
                 path: n.source.clone(),
                 removable: false,
@@ -5458,37 +5513,78 @@ fn render_file_picker(
                 ui.add_space(14.0);
                 ui.separator();
                 ui.add_space(8.0);
-                // Both columns scroll independently, so a long history
-                // never pushes the other list (or anything above) away.
-                ui.columns(2, |cols| {
-                    render_list_column(
-                        &mut cols[0],
-                        "Recent",
-                        "Files you opened recently.",
-                        &recent_rows,
-                        &mut transition,
-                    );
-                    render_list_column(
-                        &mut cols[1],
-                        "Quick Notes",
-                        "Your quicknote files, most recently edited first.",
-                        &note_rows,
-                        &mut transition,
-                    );
-                });
+                // Below this, half a window is too narrow for a card:
+                // the width floors inside the rows (minimum button and
+                // remove-button sizes) exceed the column, and the two
+                // lists overlap each other. Stacking is the honest
+                // layout at that size — every card gets the full width.
+                const TWO_COLUMNS_ABOVE: f32 = 520.0;
+                if ui.available_width() < TWO_COLUMNS_ABOVE {
+                    // One shared scroll area, because two independent
+                    // full-height scroll areas stacked vertically would
+                    // fight each other for the remaining height.
+                    egui::ScrollArea::vertical()
+                        .id_salt("picker_lists_stacked")
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            render_list_column(
+                                ui,
+                                "Recent",
+                                "Files you opened recently.",
+                                &recent_rows,
+                                &mut transition,
+                                false,
+                            );
+                            ui.add_space(12.0);
+                            render_list_column(
+                                ui,
+                                "Quick Notes",
+                                "Your quicknote files, most recently edited first.",
+                                &note_rows,
+                                &mut transition,
+                                false,
+                            );
+                        });
+                } else {
+                    // Both columns scroll independently, so a long
+                    // history never pushes the other list away.
+                    ui.columns(2, |cols| {
+                        render_list_column(
+                            &mut cols[0],
+                            "Recent",
+                            "Files you opened recently.",
+                            &recent_rows,
+                            &mut transition,
+                            true,
+                        );
+                        render_list_column(
+                            &mut cols[1],
+                            "Quick Notes",
+                            "Your quicknote files, most recently edited first.",
+                            &note_rows,
+                            &mut transition,
+                            true,
+                        );
+                    });
+                }
             }
         });
 
     transition
 }
 
-/// Render one titled, scrollable column of file rows.
+/// Render one titled column of file rows.
+///
+/// `own_scroll` wraps the rows in this column's own scroll area — right
+/// for the side-by-side layout. The stacked layout passes false and
+/// provides one shared scroll area around both columns instead.
 fn render_list_column(
     ui: &mut egui::Ui,
     title: &str,
     hint: &str,
     rows: &[ListRow],
     transition: &mut Transition,
+    own_scroll: bool,
 ) {
     ui.label(
         egui::RichText::new(title)
@@ -5512,115 +5608,162 @@ fn render_list_column(
         return;
     }
 
-    egui::ScrollArea::vertical()
-        .id_salt(("picker_list", title))
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            for row in rows {
-                let missing = row.stamp.is_none();
-                let show_remove = missing && row.removable;
-                // Width is decided BEFORE the text is laid out: a button
-                // sizes to its content, so an unwrapped detail line would
-                // push the row past its column and overlap the list next
-                // to it. Wrapping to the column is what keeps two lists
-                // side by side honest.
-                let avail = ui.available_width();
-                let btn_width = if show_remove {
-                    (avail - 30.0).max(80.0)
+    if own_scroll {
+        egui::ScrollArea::vertical()
+            .id_salt(("picker_list", title))
+            .auto_shrink([false, false])
+            .show(ui, |ui| render_list_rows(ui, rows, transition));
+    } else {
+        render_list_rows(ui, rows, transition);
+    }
+}
+
+/// The rows themselves, shared by both picker layouts.
+fn render_list_rows(ui: &mut egui::Ui, rows: &[ListRow], transition: &mut Transition) {
+    for row in rows {
+        let missing = row.stamp.is_none();
+        let show_remove = missing && row.removable;
+        // Width is decided BEFORE the text is laid out: a button
+        // sizes to its content, so an unwrapped detail line would
+        // push the row past its column and overlap the list next
+        // to it. Wrapping to the column is what keeps two lists
+        // side by side honest.
+        let avail = ui.available_width();
+        let btn_width = if show_remove {
+            (avail - 30.0).max(80.0)
+        } else {
+            avail
+        };
+        // The fingerprint sits *inside* the card, against its
+        // right edge. Its width comes off the text's wrap width
+        // rather than off the card, so the mark belongs to the
+        // card instead of floating beside it — and the text can
+        // never run underneath it.
+        let fp_h = crate::ui::fingerprint::default_height();
+        let mut fp_w = if missing {
+            0.0
+        } else {
+            crate::ui::fingerprint::size_for(fp_h).x + 12.0
+        };
+        // A card too narrow for both keeps the text and drops
+        // the glyph. The name and dates are information; the
+        // glyph is recognition; text running underneath the
+        // glyph would be neither.
+        if btn_width - 16.0 - fp_w < 60.0 {
+            fp_w = 0.0;
+        }
+        let text_width = (btn_width - 16.0 - fp_w).max(40.0);
+
+        // Name on top, identity line (size · saved · …) below.
+        let mut job = egui::text::LayoutJob::default();
+        job.wrap.max_width = text_width;
+        job.wrap.max_rows = 2;
+        job.wrap.overflow_character = Some('\u{2026}');
+        job.append(
+            &row.title,
+            0.0,
+            egui::TextFormat {
+                font_id: egui::FontId::proportional(13.0),
+                color: if missing {
+                    theme::text_dim()
                 } else {
-                    avail
-                };
-                let text_width = (btn_width - 16.0).max(40.0);
+                    theme::text_strong()
+                },
+                ..Default::default()
+            },
+        );
+        // Size leads the detail line: it's the one field that
+        // says at a glance whether a note still holds anything.
+        // The hash is deliberately not here — two columns don't
+        // have the width, and it's in the hover text instead.
+        let detail = match &row.stamp {
+            Some(st) => {
+                let mut d = format!("\n{}  \u{B7}  {}", st.size_label(), st.modified);
+                if !row.trailing.is_empty() {
+                    d.push_str(&format!("  \u{B7}  {}", row.trailing));
+                }
+                d
+            }
+            None => {
+                let mut d = "\n(missing)".to_string();
+                if !row.trailing.is_empty() {
+                    d.push_str(&format!("  \u{B7}  {}", row.trailing));
+                }
+                d
+            }
+        };
+        job.append(
+            &detail,
+            0.0,
+            egui::TextFormat {
+                font_id: egui::FontId::monospace(10.0),
+                color: theme::text_dim(),
+                ..Default::default()
+            },
+        );
 
-                // Name on top, identity line (size · saved · …) below.
-                let mut job = egui::text::LayoutJob::default();
-                job.wrap.max_width = text_width;
-                job.wrap.max_rows = 2;
-                job.wrap.overflow_character = Some('\u{2026}');
-                job.append(
-                    &row.title,
-                    0.0,
-                    egui::TextFormat {
-                        font_id: egui::FontId::proportional(13.0),
-                        color: if missing {
-                            theme::text_dim()
-                        } else {
-                            theme::text_strong()
-                        },
-                        ..Default::default()
-                    },
+        // The row is compact, so the full identity lives in the
+        // tooltip: path, hash and size, none of it truncated.
+        let hover = match &row.stamp {
+            Some(st) => format!(
+                "{}\n{}  \u{B7}  saved {}\n\n{}",
+                row.path.display(),
+                st.size_label(),
+                st.modified,
+                crate::ui::fingerprint::tooltip(
+                    &crate::ui::fingerprint::Fingerprint::new(st.digest),
+                    row.previous.as_ref(),
+                ),
+            ),
+            None => format!("{}\n(file is missing)", row.path.display()),
+        };
+
+        ui.horizontal(|ui| {
+            let btn = egui::Button::new(job)
+                .fill(theme::bg_raised().gamma_multiply(0.55))
+                .corner_radius(theme::RADIUS)
+                .min_size(egui::vec2(btn_width, 40.0));
+            let resp = ui.add_enabled(!missing, btn).on_hover_text(hover);
+            // Painted over the card after it is laid out, so it
+            // reads as part of the card and the card stays one
+            // click target. Same mark the status bar shows once
+            // the file is open — recognising it in the list and
+            // recognising it later are the same act.
+            if let (Some(st), true) = (&row.stamp, fp_w > 0.0) {
+                let fp = crate::ui::fingerprint::Fingerprint::new(st.digest);
+                let size = crate::ui::fingerprint::size_for(fp_h);
+                let at = egui::pos2(
+                    resp.rect.right() - size.x - 8.0,
+                    resp.rect.center().y - size.y / 2.0,
                 );
-                // Size leads the detail line: it's the one field that
-                // says at a glance whether a note still holds anything.
-                // The hash is deliberately not here — two columns don't
-                // have the width, and it's in the hover text instead.
-                let detail = match &row.stamp {
-                    Some(st) => {
-                        let mut d = format!("\n{}  \u{B7}  {}", st.size_label(), st.modified);
-                        if !row.trailing.is_empty() {
-                            d.push_str(&format!("  \u{B7}  {}", row.trailing));
-                        }
-                        d
-                    }
-                    None => {
-                        let mut d = "\n(missing)".to_string();
-                        if !row.trailing.is_empty() {
-                            d.push_str(&format!("  \u{B7}  {}", row.trailing));
-                        }
-                        d
-                    }
-                };
-                job.append(
-                    &detail,
-                    0.0,
-                    egui::TextFormat {
-                        font_id: egui::FontId::monospace(10.0),
-                        color: theme::text_dim(),
-                        ..Default::default()
-                    },
+                let mut strip = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(egui::Rect::from_min_size(at, size))
+                        .layout(egui::Layout::left_to_right(egui::Align::Center)),
                 );
-
-                // The row is compact, so the full identity lives in the
-                // tooltip: path, hash and size, none of it truncated.
-                let hover = match &row.stamp {
-                    Some(st) => format!(
-                        "{}\n#{}  \u{B7}  {}  \u{B7}  saved {}",
-                        row.path.display(),
-                        st.hash8,
-                        st.size_label(),
-                        st.modified
-                    ),
-                    None => format!("{}\n(file is missing)", row.path.display()),
-                };
-
-                ui.horizontal(|ui| {
-                    let btn = egui::Button::new(job)
+                crate::ui::fingerprint::paint(&mut strip, &fp, fp_h);
+            }
+            if resp.clicked() {
+                *transition = Transition::StartDecrypt(row.path.clone());
+            }
+            if show_remove
+                && ui
+                    .add(
+                        egui::Button::new(
+                            egui::RichText::new("x").size(12.0).color(theme::text_dim()),
+                        )
                         .fill(theme::bg_raised().gamma_multiply(0.55))
                         .corner_radius(theme::RADIUS)
-                        .min_size(egui::vec2(btn_width, 40.0));
-                    let resp = ui.add_enabled(!missing, btn).on_hover_text(hover);
-                    if resp.clicked() {
-                        *transition = Transition::StartDecrypt(row.path.clone());
-                    }
-                    if show_remove
-                        && ui
-                            .add(
-                                egui::Button::new(
-                                    egui::RichText::new("x").size(12.0).color(theme::text_dim()),
-                                )
-                                .fill(theme::bg_raised().gamma_multiply(0.55))
-                                .corner_radius(theme::RADIUS)
-                                .min_size(egui::vec2(24.0, 40.0)),
-                            )
-                            .on_hover_text("Remove from Recent (the file is gone)")
-                            .clicked()
-                    {
-                        *transition = Transition::RemoveRecent(row.path.clone());
-                    }
-                });
-                ui.add_space(3.0);
+                        .min_size(egui::vec2(24.0, 40.0)),
+                    )
+                    .on_hover_text("Remove from Recent (the file is gone)")
+                    .clicked()
+            {
+                *transition = Transition::RemoveRecent(row.path.clone());
             }
         });
+        ui.add_space(3.0);
+    }
 }
 
 /// The project's GitHub issue tracker (pre-filled for a bug report).
@@ -5698,6 +5841,9 @@ fn render_viewing(
     focus_mode: bool,
     layout: keybindings::Layout,
     stamp: Option<&statusbar::FileStamp>,
+    // The fingerprint this file had when it was last opened, when that
+    // differs from what is on disk now.
+    fingerprint_changed: Option<&crate::ui::fingerprint::Fingerprint>,
     // True when unsaved edits exist that cannot be encrypted into the
     // lock stash — an unsaved new file has no key of its own.
     unsaved_unprotected: bool,
@@ -5814,6 +5960,7 @@ fn render_viewing(
                     is_editing && *modified,
                     unsaved_unprotected,
                     stamp,
+                    fingerprint_changed,
                     compact,
                 )
             })
@@ -5901,6 +6048,9 @@ fn render_viewing_archive(
     focus_mode: bool,
     layout: keybindings::Layout,
     stamp: Option<&statusbar::FileStamp>,
+    // The fingerprint this file had when it was last opened, when that
+    // differs from what is on disk now.
+    fingerprint_changed: Option<&crate::ui::fingerprint::Fingerprint>,
     // See `render_viewing`.
     unsaved_unprotected: bool,
     opts: viewer::ViewOptions,
@@ -6193,6 +6343,7 @@ fn render_viewing_archive(
                     is_editing && *modified,
                     unsaved_unprotected,
                     stamp,
+                    fingerprint_changed,
                     compact,
                 )
             })

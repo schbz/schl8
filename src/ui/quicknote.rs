@@ -106,15 +106,26 @@ impl JotWindow {
     /// The handle spans the full panel width and reaches out into the frame's
     /// margin, so the whole strip above the target selector is grabbable,
     /// including the padding at the very top edge.
-    fn drag_handle(&self, ui: &mut egui::Ui, header: egui::Rect) {
+    ///
+    /// `exclude` is the close control's rect. The handle is added after
+    /// the header, so it sits on top of everything in it — anything
+    /// inside the title bar that must stay clickable has to be cut out
+    /// here, or dragging silently swallows the click.
+    fn drag_handle(&self, ui: &mut egui::Ui, header: egui::Rect, exclude: egui::Rect) {
         // The frame's inner margin (18pt) sits outside `max_rect`; covering
         // it means a press on the visible padding drags too, rather than
         // landing on dead pixels a few points from the title.
         const MARGIN: f32 = 18.0;
         let panel = ui.max_rect();
+        // The handle STOPS at the close control rather than covering it
+        // and declining to drag there. Merely suppressing the drag is not
+        // enough: an overlapping `interact` rect still claims the pointer,
+        // so the control underneath never sees a click at all — it just
+        // becomes dead. Geometry is what actually leaves it clickable.
+        let right = (exclude.left() - 6.0).max(panel.left());
         let handle = egui::Rect::from_min_max(
             egui::pos2(panel.left() - MARGIN, panel.top() - MARGIN),
-            egui::pos2(panel.right() + MARGIN, header.bottom()),
+            egui::pos2(right, header.bottom()),
         );
 
         let response = ui.interact(
@@ -156,25 +167,44 @@ impl JotWindow {
         ui.spacing_mut().item_spacing.y = 9.0;
 
         // ── Header, which is also the title bar ──────────────────────
-        let header = ui
-            .horizontal(|ui| {
-                ui.label(
-                    RichText::new("\u{1F4DD}") // memo
-                        .size(18.0)
-                        .color(theme::accent()),
-                );
-                ui.label(theme::gradient_text("Quick Note", 19.0));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(
-                        RichText::new("esc")
-                            .size(11.0)
-                            .color(theme::text_dim())
-                            .monospace(),
-                    );
-                });
+        let header = ui.horizontal(|ui| {
+            ui.label(
+                RichText::new("\u{1F4DD}") // memo
+                    .size(18.0)
+                    .color(theme::accent()),
+            );
+            ui.label(theme::gradient_text("Quick Note", 19.0));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                // A real button, so it looks like the thing it is. The
+                // keyboard Esc still works and is still what the label
+                // says — this only adds the click people expect from
+                // something sitting where a close button sits.
+                let close = ui
+                    .add(
+                        egui::Button::new(
+                            RichText::new("esc")
+                                .size(11.0)
+                                .color(theme::text_dim())
+                                .monospace(),
+                        )
+                        .fill(theme::bg_raised().gamma_multiply(0.6))
+                        .corner_radius(theme::RADIUS),
+                    )
+                    .on_hover_text("Close (or press Esc)");
+                if close.hovered() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                }
+                (close.clicked(), close.rect)
             })
-            .response;
-        self.drag_handle(ui, header.rect);
+            .inner
+        });
+        let (close_clicked, close_rect) = header.inner;
+        if close_clicked && !self.busy {
+            self.open = false;
+            self.clear_text();
+            return action;
+        }
+        self.drag_handle(ui, header.response.rect, close_rect);
         ui.add_space(2.0);
 
         // ── Target selector ──────────────────────────────────────────
