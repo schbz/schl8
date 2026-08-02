@@ -527,8 +527,57 @@ pub fn parse_hex(s: &str) -> Option<Color32> {
 
 /// Whether the active theme is light (bright background).
 pub fn is_light() -> bool {
-    let bg = read().bg_primary;
+    palette_is_light(&read())
+}
+
+fn palette_is_light(p: &Palette) -> bool {
+    let bg = p.bg_primary;
     0.299 * bg.r() as f32 + 0.587 * bg.g() as f32 + 0.114 * bg.b() as f32 > 140.0
+}
+
+/// Background for framed text inputs (dialogs, forms, the jot window).
+///
+/// Those render `override_text_color` = [`text_primary`], so the fill has
+/// to contrast with *that* — it is derived from `bg_primary`, which is
+/// `text_primary`'s guaranteed partner, rather than from the editor
+/// palette, which pairs with `text_editor` and diverges on some themes.
+pub fn input_bg() -> Color32 {
+    input_bg_for(&read())
+}
+
+fn input_bg_for(p: &Palette) -> Color32 {
+    if palette_is_light(p) {
+        p.bg_primary.gamma_multiply(0.93)
+    } else {
+        p.bg_primary.gamma_multiply(1.55)
+    }
+}
+
+/// The colour egui fades text and disabled widgets toward.
+///
+/// egui derives *placeholder* text from this: a text field's hint is
+/// `tint_color_towards(text_primary, fade_target)`, which is a plain
+/// half-and-half blend. Left at egui's own default the target is a fixed
+/// grey unrelated to any of our palettes, and the hint came out at
+/// 3.4:1 on the default dark theme and below 3:1 on every light one —
+/// the "faint text in the boxes" people actually notice.
+///
+/// So the target is [`text_dim`], which lands the blend halfway between
+/// the body text and the palette's dim colour — around 6.5–9.4:1 on the
+/// input background, against 10.6–14.4:1 for text you have actually
+/// typed. Placeholders stay visibly secondary without being a squint.
+///
+/// Aiming the blend *at* `text_dim` rather than *landing on* it is
+/// deliberate. Landing on `text_dim` was the first attempt and it was
+/// still too faint in practice — 3.6:1 on `linen` — because `text_dim`
+/// is sized for captions on the page background, not for placeholder
+/// text inside a sunken box.
+pub fn fade_target() -> Color32 {
+    fade_target_for(&read())
+}
+
+fn fade_target_for(p: &Palette) -> Color32 {
+    p.text_dim
 }
 
 /// Dark or light text for readable contrast on `bg` (public helper for
@@ -908,6 +957,62 @@ mod palettes {
                     "theme {name:?}: {what} is {ratio:.2}:1, below the                      {min:.1}:1 minimum — pick a lighter or darker color"
                 );
             }
+        }
+    }
+
+    /// Text inside input boxes — typed *and* placeholder — has to be
+    /// readable on every palette.
+    ///
+    /// `every_palette_is_readable` checks text against `bg_primary`, but
+    /// a text field is not painted on `bg_primary`: it gets
+    /// [`input_bg`], and its hint gets a colour egui derives by blending
+    /// halfway to [`fade_target`]. Neither pair was checked anywhere,
+    /// which is how placeholder text shipped at 2.5:1 on the light
+    /// themes and 3.4:1 on the default dark one.
+    #[test]
+    fn text_in_input_boxes_is_readable_on_every_palette() {
+        // Exactly egui's `tint_color_towards` for an opaque colour.
+        fn blend_halfway(c: Color32, target: Color32) -> Color32 {
+            Color32::from_rgb(
+                c.r() / 2 + target.r() / 2,
+                c.g() / 2 + target.g() / 2,
+                c.b() / 2 + target.b() / 2,
+            )
+        }
+
+        for name in PRESETS {
+            let p = preset(name);
+            let input = input_bg_for(&p);
+            let hint = blend_halfway(p.text_primary, fade_target_for(&p));
+
+            // Typed text: full body-text contrast.
+            let typed = contrast(p.text_primary, input);
+            assert!(
+                typed >= 4.5,
+                "theme {name:?}: typed text on an input box is {typed:.2}:1"
+            );
+
+            // Placeholder text: full body-text contrast, not the 3:1
+            // large-text allowance. A hint that clears 3:1 on paper can
+            // still be a squint on screen — that floor passed while
+            // "Name" and "age1…" were reported as barely readable — so
+            // this holds placeholders to the same 4.5:1 as real text.
+            let placeholder = contrast(hint, input);
+            assert!(
+                placeholder >= 4.5,
+                "theme {name:?}: placeholder text on an input box is \
+                 {placeholder:.2}:1 — raise text_dim or restyle the hint"
+            );
+
+            // The jot window swaps in the editor surface under the same
+            // text, so that pairing needs checking too.
+            let jot = contrast(p.text_primary, p.bg_editor);
+            assert!(jot >= 4.5, "theme {name:?}: jot input text is {jot:.2}:1");
+            let jot_hint = contrast(hint, p.bg_editor);
+            assert!(
+                jot_hint >= 4.5,
+                "theme {name:?}: jot placeholder text is {jot_hint:.2}:1"
+            );
         }
     }
 

@@ -3082,16 +3082,10 @@ fn configure_style(ctx: &egui::Context) {
 
     v.panel_fill = theme::bg_primary();
     v.window_fill = theme::bg_primary();
-    // Framed inputs (dialogs, forms, the jot) render override_text_color
-    // = text_primary, so their fill must contrast with THAT — derive it
-    // from bg_primary (text_primary's guaranteed partner) with a visible
-    // shift, never from the editor palette, which pairs with text_editor
-    // and clashes on themes where the two diverge.
-    v.extreme_bg_color = if theme::is_light() {
-        theme::bg_primary().gamma_multiply(0.93)
-    } else {
-        theme::bg_primary().gamma_multiply(1.55)
-    };
+    // Framed inputs (dialogs, forms, the jot). The derivation and the
+    // reasoning behind it live in `theme::input_bg`, where a test can
+    // reach them.
+    v.extreme_bg_color = theme::input_bg();
     v.faint_bg_color = theme::bg_raised();
     v.window_stroke = egui::Stroke::new(1.0, theme::bg_raised());
     v.window_corner_radius = egui::CornerRadius::same(theme::RADIUS as u8);
@@ -3128,6 +3122,11 @@ fn configure_style(ctx: &egui::Context) {
     }
     v.widgets.hovered.fg_stroke.color = theme::text_strong();
     v.widgets.active.fg_stroke.color = theme::text_strong();
+    // What egui fades toward — placeholder text in every input, and
+    // disabled widgets everywhere. Setting the other three weak fills
+    // but not this one left egui's own default grey in place, which is
+    // why hint text looked washed out on themes it had never seen.
+    v.widgets.noninteractive.weak_bg_fill = theme::fade_target();
 
     style.visuals = v;
     style.interaction.selectable_labels = false;
@@ -3824,14 +3823,36 @@ impl eframe::App for App {
         let menu_action = if self.focus_mode || self.crawl.active {
             None
         } else {
-            let menu_resp = egui::TopBottomPanel::top("menubar")
-                .exact_height(26.0)
-                .frame(
-                    egui::Frame::NONE
-                        .fill(theme::bg_statusbar())
-                        .inner_margin(egui::Margin::symmetric(8, 3)),
-                )
-                .show(ctx, |ui| menu::render(ui, menu_flags));
+            // In macOS fullscreen the system menu bar is hidden and
+            // re-appears when the pointer reaches the top edge —
+            // directly on top of ours, since a fullscreen window owns
+            // the whole screen including that strip. A click there goes
+            // to the reveal, not to us, which is why a menu sometimes
+            // simply refused to open once the window was maximised.
+            // Stepping below the strip takes us out of the argument.
+            //
+            // Only in true fullscreen: a window merely zoomed to fill
+            // the screen still sits *below* a permanently visible
+            // system menu bar and needs no inset.
+            let reveal_inset: f32 = if cfg!(target_os = "macos")
+                && ctx.input(|i| i.viewport().fullscreen.unwrap_or(false))
+            {
+                MENU_BAR_REVEAL_INSET
+            } else {
+                0.0
+            };
+            let menu_resp =
+                egui::TopBottomPanel::top("menubar")
+                    .exact_height(26.0 + reveal_inset)
+                    .frame(egui::Frame::NONE.fill(theme::bg_statusbar()).inner_margin(
+                        egui::Margin {
+                            left: 8,
+                            right: 8,
+                            top: 3 + reveal_inset as i8,
+                            bottom: 3,
+                        },
+                    ))
+                    .show(ctx, |ui| menu::render(ui, menu_flags));
             let r = menu_resp.response.rect;
             let line = egui::Rect::from_min_max(
                 egui::pos2(r.left(), r.bottom() - 1.5),
@@ -4992,8 +5013,18 @@ impl eframe::App for App {
         if let Some((msg, is_error, until)) = &self.toast {
             let now = ctx.input(|i| i.time);
             if now < *until {
+                // Width is set explicitly. Without it the Area sizes to
+                // whatever egui's default wrap allows, which turned a
+                // long warning into a tall narrow column standing in the
+                // middle of the window — covering the very screen it was
+                // trying to annotate. Wide and short is the shape a
+                // notification should have.
+                let screen = ctx.screen_rect().width();
+                let toast_w = (screen - 80.0).clamp(240.0, 640.0);
+                let mut dismiss = false;
                 egui::Area::new(egui::Id::new("toast"))
-                    .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -48.0))
+                    // Low against the bottom edge, clear of the status bar.
+                    .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -14.0))
                     .show(ctx, |ui| {
                         // Theme accents with contrast-checked text, so the
                         // toast is readable on every palette (the old
@@ -5004,24 +5035,56 @@ impl eframe::App for App {
                         } else {
                             theme::accent_green()
                         };
+                        let fg = theme::contrast_text(bg);
                         egui::Frame::NONE
                             .fill(bg)
                             .corner_radius(6.0)
-                            .stroke(egui::Stroke::new(
-                                1.0,
-                                theme::contrast_text(bg).gamma_multiply(0.25),
-                            ))
-                            .inner_margin(egui::Margin::symmetric(16, 8))
+                            .stroke(egui::Stroke::new(1.0, fg.gamma_multiply(0.25)))
+                            .inner_margin(egui::Margin::symmetric(14, 8))
                             .show(ui, |ui| {
-                                ui.label(
-                                    egui::RichText::new(msg.as_str())
-                                        .size(13.0)
-                                        .strong()
-                                        .color(theme::contrast_text(bg)),
-                                );
+                                ui.set_max_width(toast_w);
+                                ui.horizontal_top(|ui| {
+                                    // The text takes everything except the
+                                    // close button's column, so wrapping
+                                    // never runs under the ✕.
+                                    ui.allocate_ui_with_layout(
+                                        egui::vec2(toast_w - 26.0, 0.0),
+                                        egui::Layout::top_down(egui::Align::LEFT),
+                                        |ui| {
+                                            ui.label(
+                                                egui::RichText::new(msg.as_str())
+                                                    .size(13.0)
+                                                    .strong()
+                                                    .color(fg),
+                                            );
+                                        },
+                                    );
+                                    // A way out. The long warnings linger
+                                    // for twelve seconds so they can be
+                                    // read; nobody should have to wait out
+                                    // a message they have already read.
+                                    if ui
+                                        .add(
+                                            egui::Button::new(
+                                                egui::RichText::new("\u{00D7}")
+                                                    .size(15.0)
+                                                    .color(fg),
+                                            )
+                                            .frame(false),
+                                        )
+                                        .on_hover_text("Dismiss")
+                                        .clicked()
+                                    {
+                                        dismiss = true;
+                                    }
+                                });
                             });
                     });
-                ctx.request_repaint();
+                if dismiss {
+                    self.toast = None;
+                } else {
+                    ctx.request_repaint();
+                }
             } else {
                 self.toast = None;
             }
@@ -5765,6 +5828,13 @@ fn render_list_rows(ui: &mut egui::Ui, rows: &[ListRow], transition: &mut Transi
         ui.add_space(3.0);
     }
 }
+
+/// How far the menu bar drops when the window is in macOS fullscreen.
+///
+/// Matches the height of the system menu bar that reveals itself over
+/// the top edge there. Anything less and the reveal strip still clips
+/// the menu buttons; anything more is wasted chrome.
+const MENU_BAR_REVEAL_INSET: f32 = 26.0;
 
 /// The project's GitHub issue tracker (pre-filled for a bug report).
 const ISSUES_URL: &str =

@@ -100,7 +100,7 @@ stranger's hobby project. The [architecture map](CLAUDE.md) and
   | Backend | What you need | Best for |
   |---|---|---|
   | **GPG** | [GnuPG](https://gnupg.org/) (`brew install gnupg`) and a key pair — local, or on a YubiKey / smart card via `gpg-agent` | Hardware-backed keys; files you already manage with GPG |
-  | **AGE** | Nothing installed. A 12-word BIP-39 seed phrase you keep yourself | No dependencies, no keyring, and a key you can write on paper |
+  | **AGE** | Nothing installed. A 12-word BIP-39 seed phrase you keep yourself, optionally with an extra passphrase | No dependencies, no keyring, and a key you can write on paper |
 
 **GnuPG is optional.** With no `gpg` on the system, Schl8 runs AGE-only and
 everything else works unchanged — the GPG-specific menus simply don't appear.
@@ -337,7 +337,11 @@ backup script.
 jump-to-match; replace one or all while editing.
 
 **Key management** — Keys menu: import, list, and delete GPG public keys, and
-export your AGE public key, without leaving the app.
+export your AGE public key, without leaving the app. "Generate new AGE key…"
+creates one from the system CSPRNG, optionally stirring in randomness you type
+yourself, and optionally protected by an extra passphrase — the same "25th
+word" the unlock screen accepts. With a passphrase set, the twelve words alone
+will not open the key, so both have to be written down.
 
 ### Quick Note — capture without opening anything
 

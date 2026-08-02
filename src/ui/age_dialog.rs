@@ -43,6 +43,15 @@ pub struct AgeDialog {
     derived_recipient: Option<String>,
     /// Optional user-supplied entropy typed in generate mode.
     entropy_input: SecureString,
+    /// Second copy of the passphrase, generate mode only.
+    ///
+    /// A mistyped BIP-39 passphrase does not fail — it silently derives
+    /// a *different, perfectly valid* key. When unlocking that is
+    /// recoverable: you try again. At generation it is not. You would
+    /// write down twelve words, store a recipient, and never be able to
+    /// reach the key again, because the passphrase you meant to set was
+    /// never the one that made it. Hence typing it twice.
+    passphrase_confirm: SecureString,
     /// A freshly generated 12-word mnemonic (generate mode), shown once so
     /// the user can write it down. Held only in memory.
     generated_phrase: Option<SecureString>,
@@ -60,6 +69,7 @@ impl AgeDialog {
             show_passphrase_field: false,
             derived_recipient: None,
             entropy_input: SecureString::empty(),
+            passphrase_confirm: SecureString::empty(),
             generated_phrase: None,
             error: None,
             want_focus: false,
@@ -82,6 +92,7 @@ impl AgeDialog {
         self.mode = mode;
         self.phrase = SecureString::empty();
         self.passphrase = SecureString::empty();
+        self.passphrase_confirm = SecureString::empty();
         self.show_passphrase_field = false;
         self.derived_recipient = None;
         self.entropy_input = SecureString::empty();
@@ -101,6 +112,7 @@ impl AgeDialog {
     pub fn clear_secrets(&mut self) {
         self.phrase = SecureString::empty();
         self.passphrase = SecureString::empty();
+        self.passphrase_confirm = SecureString::empty();
         self.entropy_input = SecureString::empty();
         self.generated_phrase = None;
     }
@@ -131,6 +143,12 @@ impl AgeDialog {
         egui::Window::new(title)
             .open(&mut is_open)
             .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
+            // Above the other windows, not merely after them. "Generate
+            // new AGE key…" is launched *from* the Manage Public Keys
+            // window, which is centred too and larger — so at the
+            // default order this dialog opened exactly behind it and the
+            // button looked like it did nothing at all.
+            .order(egui::Order::Foreground)
             .resizable(false)
             .collapsible(false)
             .default_width(theme::dialog_width(ctx, 500.0))
@@ -285,9 +303,16 @@ impl AgeDialog {
             ui.label(RichText::new(label).size(12.0).color(color).strong());
         });
         let frac = (bits / 128.0).clamp(0.0, 1.0) as f32;
+        // `available_width()`, NOT `f32::INFINITY`. TextEdit treats an
+        // infinite desired width as "fill the row", so the same idiom a
+        // few lines up is fine — ProgressBar takes it literally and lays
+        // out an infinitely wide rect. The next subtraction in egui's
+        // layout is then ∞ − ∞ = NaN, which trips a debug assertion and
+        // takes the whole process down: opening this dialog crashed the
+        // app before it had drawn a single frame of itself.
         ui.add(
             egui::ProgressBar::new(frac)
-                .desired_width(f32::INFINITY)
+                .desired_width(ui.available_width())
                 .fill(color),
         );
         ui.label(
@@ -299,25 +324,94 @@ impl AgeDialog {
             .color(theme::text_dim()),
         );
 
+        // ── Optional passphrase (25th word) ──────────────────
+        ui.add_space(2.0);
+        let toggled = ui
+            .checkbox(
+                &mut self.show_passphrase_field,
+                RichText::new("Protect this key with an extra passphrase (25th word)")
+                    .size(12.0)
+                    .color(theme::text_primary()),
+            )
+            .changed();
+        let mut passphrase_edited = toggled;
+        if self.show_passphrase_field {
+            ui.label(
+                RichText::new(
+                    "The passphrase is not stored in the twelve words and cannot be \
+                     recovered from them, changed later, or reset. Both together open \
+                     the key; either alone opens nothing. Write it down with the words.",
+                )
+                .size(11.0)
+                .color(theme::accent_yellow()),
+            );
+            passphrase_edited |=
+                super::secure_edit::multiline(ui, &mut self.passphrase, None, |te| {
+                    te.font(egui::TextStyle::Monospace)
+                        .desired_width(f32::INFINITY)
+                        .desired_rows(1)
+                        .hint_text("passphrase")
+                        .password(true)
+                        .lock_focus(true)
+                })
+                .changed();
+            passphrase_edited |=
+                super::secure_edit::multiline(ui, &mut self.passphrase_confirm, None, |te| {
+                    te.font(egui::TextStyle::Monospace)
+                        .desired_width(f32::INFINITY)
+                        .desired_rows(1)
+                        .hint_text("type it again")
+                        .password(true)
+                        .lock_focus(true)
+                })
+                .changed();
+            if let Some(problem) = self.passphrase_problem() {
+                ui.label(
+                    RichText::new(problem)
+                        .size(11.5)
+                        .color(theme::accent_red())
+                        .strong(),
+                );
+            }
+        }
+        // A key already on screen was derived with whatever the
+        // passphrase was a moment ago. Change it and the recipient below
+        // is no longer this key's recipient — so re-derive from the same
+        // twelve words rather than leave a stale `age1…` on display for
+        // someone to copy into their keyring.
+        if passphrase_edited && self.generated_phrase.is_some() {
+            self.rederive_recipient();
+        }
+
         if let Some(err) = &self.error {
             ui.label(RichText::new(err).size(12.0).color(theme::accent_red()));
         }
 
         // ── Generated phrase (after Generate) ────────────────
+        let with_passphrase = self.show_passphrase_field;
         if let Some(phrase) = &self.generated_phrase {
             ui.separator();
             ui.label(
-                RichText::new("⚠  Write these 12 words down now")
-                    .size(13.0)
-                    .color(theme::accent_red())
-                    .strong(),
+                RichText::new(if with_passphrase {
+                    "⚠  Write these 12 words AND your passphrase down now"
+                } else {
+                    "⚠  Write these 12 words down now"
+                })
+                .size(13.0)
+                .color(theme::accent_red())
+                .strong(),
             );
             ui.label(
-                RichText::new(
+                RichText::new(if with_passphrase {
+                    "These twelve words and your passphrase together are the ONLY way to \
+                     unlock this key. Neither is saved to disk, and the words alone will \
+                     not do it — lose either one and the key, and everything encrypted to \
+                     it, are gone for good."
+                } else {
                     "This recovery phrase is the ONLY way to unlock this key. It is never \
                      saved to disk — if you lose it, the key and everything encrypted to it \
-                     are gone for good.",
-                )
+                     are gone for good."
+                })
                 .size(11.5)
                 .color(theme::text_dim()),
             );
@@ -434,13 +528,76 @@ impl AgeDialog {
         }
     }
 
+    /// The passphrase this key is being generated with — empty when the
+    /// user has not asked for one.
+    fn effective_passphrase(&self) -> &str {
+        if self.show_passphrase_field {
+            self.passphrase.as_str()
+        } else {
+            ""
+        }
+    }
+
+    /// Why the passphrase is not usable yet, if it isn't.
+    ///
+    /// Only meaningful with the passphrase enabled: an empty one there
+    /// means the box is ticked and nothing typed, which would silently
+    /// generate an unprotected key while looking protected.
+    fn passphrase_problem(&self) -> Option<&'static str> {
+        if !self.show_passphrase_field {
+            return None;
+        }
+        if self.passphrase.as_str().is_empty() {
+            Some("Enter a passphrase, or clear the checkbox above.")
+        } else if self.passphrase.as_str() != self.passphrase_confirm.as_str() {
+            Some("The two passphrases do not match.")
+        } else {
+            None
+        }
+    }
+
+    /// Recompute the shown recipient from the phrase already generated.
+    ///
+    /// Used when the passphrase changes after generation: same twelve
+    /// words, different key. While the passphrase is unusable there is
+    /// no honest recipient to show, so none is shown.
+    fn rederive_recipient(&mut self) {
+        if self.passphrase_problem().is_some() {
+            self.derived_recipient = None;
+            return;
+        }
+        let derived = self.generated_phrase.as_ref().map(|phrase| {
+            age_backend::recipient_from_mnemonic(phrase.as_str(), self.effective_passphrase())
+        });
+        match derived {
+            Some(Ok(recipient)) => {
+                self.derived_recipient = Some(recipient);
+                self.error = None;
+            }
+            Some(Err(e)) => {
+                self.derived_recipient = None;
+                self.error = Some(format!("{e:#}"));
+            }
+            None => self.derived_recipient = None,
+        }
+    }
+
     /// Generate mode: create a fresh mnemonic from OS randomness plus the
     /// typed entropy, and derive its public recipient for display.
     fn generate(&mut self) {
         self.error = None;
+        // Checked before burning randomness: generating a key the user
+        // cannot open is worse than refusing to generate one.
+        if let Some(problem) = self.passphrase_problem() {
+            self.error = Some(problem.to_string());
+            return;
+        }
         match age_backend::generate_mnemonic_with_entropy(self.entropy_input.as_bytes()) {
             Ok(mnemonic) => {
-                match age_backend::recipient_from_mnemonic(mnemonic.as_str(), "") {
+                match age_backend::recipient_from_mnemonic(
+                    mnemonic.as_str(),
+                    self.effective_passphrase(),
+                ) {
                     Ok(recipient) => self.derived_recipient = Some(recipient),
                     Err(e) => {
                         self.error = Some(format!("{e:#}"));
@@ -479,5 +636,231 @@ fn entropy_quality(bits: f64) -> (&'static str, egui::Color32) {
         ("good", theme::accent())
     } else {
         ("strong", theme::badge_bg())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Render `dialog` for a few frames, as the app would.
+    ///
+    /// More than one frame because egui defers work to the frame after a
+    /// widget first appears — a single pass can miss a crash.
+    fn run_frames(dialog: &mut AgeDialog) {
+        let ctx = egui::Context::default();
+        for _ in 0..3 {
+            let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                dialog.render(ctx);
+            });
+        }
+    }
+
+    /// Opening this dialog must not take the application down with it.
+    ///
+    /// It did: the entropy meter asked for `f32::INFINITY` width, which
+    /// `TextEdit` reads as "fill the row" but `ProgressBar` takes
+    /// literally, and the infinite rect became a NaN one subtraction
+    /// later. The dialog crashed the process before drawing a frame of
+    /// itself, which looked from outside like the button doing nothing.
+    #[test]
+    fn opening_the_generate_dialog_does_not_crash() {
+        let mut dialog = AgeDialog::new();
+        dialog.show_generate();
+        run_frames(&mut dialog);
+        assert!(dialog.open, "the dialog should still be open");
+    }
+
+    /// The same screen once a key exists: more widgets, same hazard.
+    #[test]
+    fn showing_a_generated_key_does_not_crash() {
+        let mut dialog = AgeDialog::new();
+        dialog.show_generate();
+        dialog.generate();
+        assert!(
+            dialog.generated_phrase.is_some(),
+            "generation should have produced a phrase: {:?}",
+            dialog.error
+        );
+        run_frames(&mut dialog);
+    }
+
+    /// The other two modes share the layout code; neither should crash
+    /// either, and nothing here should depend on which ran first.
+    #[test]
+    fn the_unlock_and_export_dialogs_do_not_crash() {
+        for open in [AgeDialog::show_unlock, AgeDialog::show_export] {
+            let mut dialog = AgeDialog::new();
+            open(&mut dialog);
+            run_frames(&mut dialog);
+        }
+    }
+
+    /// Entropy estimation runs every frame over whatever has been typed,
+    /// including nothing at all — and feeds a progress bar, where a NaN
+    /// or an out-of-range fraction is a panic rather than a wrong pixel.
+    #[test]
+    fn the_entropy_meter_fraction_is_always_drawable() {
+        for input in [
+            "".as_bytes(),
+            "a".as_bytes(),
+            "aaaaaaaaaaaaaaaaaaaa".as_bytes(),
+            &[0u8; 4096],
+        ] {
+            let bits = age_backend::estimate_entropy_bits(input);
+            assert!(
+                bits.is_finite(),
+                "entropy was {bits} for {} bytes",
+                input.len()
+            );
+            let frac = (bits / 128.0).clamp(0.0, 1.0) as f32;
+            assert!(
+                frac.is_finite() && (0.0..=1.0).contains(&frac),
+                "fraction {frac} is not a drawable progress value"
+            );
+        }
+    }
+
+    /// Set the passphrase pair as the user would have typed it.
+    fn type_passphrase(dialog: &mut AgeDialog, pass: &str, confirm: &str) {
+        dialog.show_passphrase_field = true;
+        dialog.passphrase = SecureString::empty();
+        dialog.passphrase.push_str(pass);
+        dialog.passphrase_confirm = SecureString::empty();
+        dialog.passphrase_confirm.push_str(confirm);
+    }
+
+    /// The whole point of the feature: the passphrase has to reach the
+    /// derivation. A key generated "with" one that was silently ignored
+    /// would be unprotected while looking protected.
+    #[test]
+    fn the_passphrase_changes_which_key_is_generated() {
+        let mut plain = AgeDialog::new();
+        plain.show_generate();
+        plain.generate();
+        let phrase = plain
+            .generated_phrase
+            .as_ref()
+            .unwrap()
+            .as_str()
+            .to_string();
+        let without = plain.derived_recipient.clone().unwrap();
+
+        // Same twelve words, a passphrase added.
+        let with = age_backend::recipient_from_mnemonic(&phrase, "correct horse").unwrap();
+        assert_ne!(
+            without, with,
+            "the passphrase made no difference to the derived key"
+        );
+    }
+
+    /// The recipient shown at generation must be the one the user gets
+    /// back when they later unlock with those same secrets. If these
+    /// ever disagree, someone encrypts to a key they cannot open.
+    #[test]
+    fn the_shown_recipient_is_what_unlocking_reproduces() {
+        let mut dialog = AgeDialog::new();
+        dialog.show_generate();
+        type_passphrase(&mut dialog, "a passphrase", "a passphrase");
+        dialog.generate();
+
+        let shown = dialog.derived_recipient.clone().expect("a recipient");
+        let phrase = dialog
+            .generated_phrase
+            .as_ref()
+            .unwrap()
+            .as_str()
+            .to_string();
+        let identity =
+            age_backend::AgeIdentity::from_mnemonic(&phrase, "a passphrase").expect("unlock");
+        assert_eq!(identity.recipient(), shown);
+
+        // And the words alone are a different key entirely — which is
+        // exactly why both have to be written down.
+        let no_pass = age_backend::AgeIdentity::from_mnemonic(&phrase, "").expect("unlock");
+        assert_ne!(no_pass.recipient(), shown);
+    }
+
+    /// A typo in the confirmation must stop generation. A mistyped BIP-39
+    /// passphrase does not fail, it derives a different valid key — so
+    /// without this check the user writes down words that open nothing
+    /// they can reach.
+    #[test]
+    fn a_mismatched_confirmation_refuses_to_generate() {
+        let mut dialog = AgeDialog::new();
+        dialog.show_generate();
+        type_passphrase(&mut dialog, "hunter2", "hunter3");
+        dialog.generate();
+        assert!(dialog.generated_phrase.is_none(), "generated anyway");
+        assert!(dialog.derived_recipient.is_none());
+        assert!(dialog
+            .error
+            .as_deref()
+            .unwrap_or("")
+            .contains("do not match"));
+    }
+
+    /// Ticking the box and typing nothing would quietly produce an
+    /// unprotected key while the screen said it was protected.
+    #[test]
+    fn an_empty_passphrase_refuses_to_generate() {
+        let mut dialog = AgeDialog::new();
+        dialog.show_generate();
+        type_passphrase(&mut dialog, "", "");
+        dialog.generate();
+        assert!(dialog.generated_phrase.is_none(), "generated anyway");
+        assert!(dialog.error.is_some());
+    }
+
+    /// Changing the passphrase after generating keeps the twelve words
+    /// and re-derives the key. Leaving the old recipient on screen would
+    /// invite copying an `age1…` that belongs to a different key.
+    #[test]
+    fn editing_the_passphrase_after_generating_rederives_the_recipient() {
+        let mut dialog = AgeDialog::new();
+        dialog.show_generate();
+        type_passphrase(&mut dialog, "first", "first");
+        dialog.generate();
+        let phrase = dialog
+            .generated_phrase
+            .as_ref()
+            .unwrap()
+            .as_str()
+            .to_string();
+        let first = dialog.derived_recipient.clone().unwrap();
+
+        type_passphrase(&mut dialog, "second", "second");
+        dialog.rederive_recipient();
+        let second = dialog.derived_recipient.clone().unwrap();
+
+        assert_eq!(
+            dialog.generated_phrase.as_ref().unwrap().as_str(),
+            phrase,
+            "the words should not change"
+        );
+        assert_ne!(first, second, "the key should have been re-derived");
+        assert_eq!(
+            second,
+            age_backend::AgeIdentity::from_mnemonic(&phrase, "second")
+                .unwrap()
+                .recipient()
+        );
+
+        // Half-typed confirmation: show no recipient at all rather than
+        // one that does not correspond to what will be saved.
+        type_passphrase(&mut dialog, "third", "thi");
+        dialog.rederive_recipient();
+        assert!(dialog.derived_recipient.is_none());
+    }
+
+    /// Closing must zeroize the confirmation too, not just the original.
+    #[test]
+    fn closing_clears_both_passphrase_copies() {
+        let mut dialog = AgeDialog::new();
+        dialog.show_generate();
+        type_passphrase(&mut dialog, "secret", "secret");
+        dialog.close();
+        assert!(dialog.passphrase.as_str().is_empty());
+        assert!(dialog.passphrase_confirm.as_str().is_empty());
     }
 }

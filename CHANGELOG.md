@@ -7,6 +7,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.42] - 2026-08-02
+
+### Added
+
+- **A generated AGE key can now carry an extra passphrase**, the same
+  optional "25th word" the unlock screen already accepts — so a key made
+  in Schl8 can be protected the same way as one brought to it. The words
+  and the passphrase together open the key; either alone opens nothing.
+
+  It has to be typed twice. A mistyped BIP-39 passphrase does not fail —
+  it silently derives a *different, perfectly valid* key. When
+  unlocking that costs you a retry; at generation it is unrecoverable,
+  because you would write down twelve words, store a recipient, and
+  never be able to reach the key again. Generation is refused outright
+  if the two copies differ or the box is ticked with nothing typed,
+  which would otherwise produce an unprotected key that looked
+  protected. Changing the passphrase after generating keeps the same
+  twelve words and re-derives the recipient, rather than leaving a
+  stale `age1…` on screen for someone to copy into their keyring.
+
+### Fixed
+
+- **A long warning turned the toast into a tall column across the
+  middle of the window.** The notification had no width of its own, so
+  egui wrapped it at whatever narrow default was going, and the
+  200-character "save before locking" warning shown on every new file
+  stood there for twelve seconds covering the document it was talking
+  about. Toasts are now explicitly wide and short, sit low against the
+  bottom edge, and carry a ✕ — twelve seconds is long enough to read
+  something, and far too long to be stuck with it.
+- **"Generate new AGE key…" crashed the app.** Two faults stacked on
+  top of each other. The dialog asked for `f32::INFINITY` width for its
+  entropy meter — an idiom `TextEdit` reads as "fill the row", but
+  `ProgressBar` takes literally, laying out an infinitely wide rect that
+  became NaN one subtraction later and tripped an assertion inside egui.
+  The dialog killed the process before drawing a frame of itself. And
+  because it also opened centred at the default window order, directly
+  behind the larger Manage Public Keys window that launched it, there
+  was nothing on screen to suggest what had happened — the button simply
+  appeared inert. The meter now sizes to the available width, and the
+  dialog draws in the foreground layer. Four tests render every mode of
+  the dialog headlessly, which is what would have caught this.
+- **Placeholder text in input boxes was too faint, on every theme.**
+  egui derives a field's hint by blending the text colour halfway
+  toward `noninteractive.weak_bg_fill` — and that was the one widget
+  fill the theme never set, so it stayed at egui's own default grey,
+  a colour belonging to none of the sixteen palettes. Hints came out
+  at 3.4:1 on the default dark theme and 2.6–2.8:1 on all four light
+  ones — the "Name" and "age1…" prompts in Manage Public Keys being
+  the ones people actually noticed. The fade target is now each
+  palette's `text_dim`, which lands the blend halfway between body
+  text and that dim colour: 6.5–9.4:1 across every theme, against
+  10.6–14.4:1 for text you have typed. Placeholders stay visibly
+  secondary without being a squint.
+
+  A test now checks both the typed text and the placeholder against
+  the actual input-box background for all sixteen palettes, in the app
+  window and in the jot, and holds placeholders to the same 4.5:1 as
+  real text rather than the 3:1 large-text allowance — a hint that
+  clears 3:1 on paper can still be unreadable on screen. The existing
+  readability test only ever compared text against `bg_primary`, which
+  is not what a text field is painted on; that is how this shipped.
+- **Menu bar submenus sometimes refused to open in fullscreen.** A
+  macOS fullscreen window owns the whole screen, including the strip
+  where the system menu bar reveals itself on hover — so a click on our
+  menu bar could go to that reveal instead of to us. In fullscreen the
+  menu bar now sits below the strip. Windows merely zoomed to fill the
+  screen are unaffected: they sit under a permanently visible system
+  menu bar and need no inset.
+
 ## [1.0.41] - 2026-08-01
 
 ### Added
@@ -75,7 +145,9 @@ Nothing here reads plaintext. The hash covers the **ciphertext** on
 disk, so every byte drawn is something any observer of the encrypted
 file could compute themselves.
 
-## [1.0.4] - 2026-07-31 — documentation and repository work
+## [1.0.40] - 2026-08-01
+
+Documentation and repository work; no change to the program itself.
 
 ### Added
 
