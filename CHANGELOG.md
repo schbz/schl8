@@ -7,6 +7,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.43] - 2026-08-02
+
+### Added
+
+- **Momentum — a writing mode that locks the document if you stop
+  typing.** Switched on per session from View. A pause longer than the
+  configured few seconds (three by default) locks the session; unsaved
+  text goes through the ordinary lock path, so it is encrypted into the
+  stash first and the penalty is having to unlock, never lost words.
+
+  It exists for the blank page rather than for security. A first draft
+  stalls when you stop to judge the sentence you just wrote, and the
+  cure writers actually use is to keep the hand moving — so stopping
+  now costs something. Only typing counts (mouse movement holds off the
+  idle lock but is not writing), it only counts while the editor is
+  open, and it refuses to arm on a document with no key to stash to,
+  where the lock would be deferred and the mode would look broken.
+
+  The clock starts when the editor opens, not when the lock fired —
+  otherwise the grace period spends itself while you are still typing
+  a passphrase, and the mode re-locks the instant your text comes
+  back. Returning to the editor gets three times the configured grace,
+  because restarting is harder than starting. The pause is measured
+  from the end of that grace rather than from your last keystroke, so
+  the grace grants time instead of merely postponing the reckoning;
+  measured the other way, a long grace had already spent the pause by
+  the time it ended, and the countdown went straight to zero without
+  ever appearing.
+
+  The countdown is its own overlay rather than a status-bar item
+  specifically so it survives focus mode — the two are meant to be used
+  together. Pause, grace period and countdown visibility are in
+  Settings; the mode itself is never persisted, because a setting that
+  locks your document on a pause should not be inherited from the last
+  time the app ran.
+- **A keyboard-shortcut panel** (View → Keyboard Shortcuts), listing
+  the shortcuts that work *right now* — read from your own bindings and
+  your keyboard layout, and filtered by what the app is doing.
+- **The idle auto-lock timeout is now in Settings**, alongside the
+  lock-on-sleep toggle. It had always been configurable and had never
+  been reachable except by editing `config.toml` by hand.
+- **A countdown beside Lock Now**, showing how long until the session
+  locks itself for being idle. It appears only after thirty seconds of
+  inactivity: a counter that starts the moment you stop typing is a
+  distraction, and one that appears with seconds left is a jump scare.
+
+### Changed
+
+- The picker's main button now reads **"Open a Note or Vault"**. It has
+  always also opened plain `.md`/`.txt` (encrypted on their first save)
+  and folder vaults, so "Open Encrypted File" told a third of the truth.
+
+### Removed
+
+- **The keybinding hints in the status bar.** Two fixed strings that
+  were wrong twice over: they named the QWERTY motion keys to everyone,
+  though those keys are remapped to physical position on Dvorak,
+  Colemak and Workman, and they named `Cmd+E` whatever the user had
+  actually rebound it to. The panel above replaces them with something
+  that asks the config.
+
 ## [1.0.42] - 2026-08-02
 
 ### Added

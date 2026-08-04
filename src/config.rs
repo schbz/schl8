@@ -193,6 +193,8 @@ pub struct AppSection {
     pub lock_on_sleep: bool,
     /// Show the floating statistics card in the viewer (View → Statistics).
     pub show_stats: bool,
+    /// Show the floating keyboard-shortcut list (View → Keyboard Shortcuts).
+    pub show_shortcuts: bool,
     /// Keyboard layout for position-based navigation keys:
     /// "qwerty" (default), "dvorak", "colemak", "workman".
     pub keyboard_layout: String,
@@ -217,12 +219,57 @@ impl Default for AppSection {
             auto_lock_minutes: 5,
             lock_on_sleep: true,
             show_stats: false,
+            show_shortcuts: false,
             keyboard_layout: "qwerty".to_string(),
             post_save_command: String::new(),
             notes_dir: PathBuf::new(),
         }
     }
 }
+
+/// Momentum: lock the document if typing stops for too long.
+///
+/// A writing mode, not a security one. The idle auto-lock exists to
+/// protect a document you walked away from; this exists to keep you
+/// moving through a first draft, by making a long pause cost something.
+/// Both end in the same place — the session locks, unsaved text is
+/// stashed encrypted, and nothing is lost — but they answer to different
+/// timers and different intentions, which is why the settings are
+/// separate.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MomentumSection {
+    /// Seconds of no typing before the session locks, while the mode is
+    /// on and the editor is open.
+    pub pause_seconds: f32,
+    /// Seconds of grace after switching the mode on (or unlocking back
+    /// into it) before the timer starts to count.
+    ///
+    /// Without this the mode fires while you are still finding the
+    /// keyboard, which teaches people it is broken rather than strict.
+    pub grace_seconds: f32,
+    /// Show the countdown while it is running. Off makes the pressure
+    /// implicit; the mode still locks either way.
+    pub show_countdown: bool,
+}
+
+impl Default for MomentumSection {
+    fn default() -> Self {
+        Self {
+            pause_seconds: 3.0,
+            grace_seconds: 5.0,
+            show_countdown: true,
+        }
+    }
+}
+
+/// Bounds for the momentum pause, in seconds.
+///
+/// The floor is not zero: a pause shorter than a second locks between
+/// keystrokes for anyone who stops to think about a word, which is not
+/// a writing aid but a stuck door.
+pub const MIN_MOMENTUM_PAUSE: f32 = 1.0;
+pub const MAX_MOMENTUM_PAUSE: f32 = 60.0;
 
 /// `~/Documents/Schl8` — the fallback when nothing is configured.
 ///
@@ -706,6 +753,8 @@ pub struct Config {
     pub favorites: Vec<Favorite>,
     /// Animated reading mode.
     pub crawl: CrawlSection,
+    /// Lock-on-pause writing mode.
+    pub momentum: MomentumSection,
     /// Remembered on-disk fingerprints, most recently seen first.
     pub seen_files: Vec<SeenFile>,
 }
@@ -787,6 +836,20 @@ impl Config {
         };
         self.favorites.truncate(MAX_FAVORITES);
         self.crawl = self.crawl.clamped();
+        // A hand-edited 0 (or a NaN) would lock between keystrokes and
+        // leave no way back into the file to fix the setting.
+        let pause = self.momentum.pause_seconds;
+        self.momentum.pause_seconds = if pause.is_finite() {
+            pause.clamp(MIN_MOMENTUM_PAUSE, MAX_MOMENTUM_PAUSE)
+        } else {
+            MomentumSection::default().pause_seconds
+        };
+        let grace = self.momentum.grace_seconds;
+        self.momentum.grace_seconds = if grace.is_finite() {
+            grace.clamp(0.0, MAX_MOMENTUM_PAUSE)
+        } else {
+            MomentumSection::default().grace_seconds
+        };
     }
 
     /// Fold the pre-registry flat `targets` list into `notes` as

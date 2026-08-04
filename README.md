@@ -35,6 +35,7 @@ you'd rather see it laid out than read a long file.
   - [Editing, encrypting, saving](#editing-encrypting-saving)
   - [Quick Note — capture without opening anything](#quick-note--capture-without-opening-anything)
   - [Favorites](#favorites)
+  - [Momentum — keep writing or it locks](#momentum--keep-writing-or-it-locks)
   - [Crawl — hands-free reading](#crawl--hands-free-reading)
   - [Locking, and the encrypted stash](#locking-and-the-encrypted-stash)
   - [Encrypted folder archives](#encrypted-folder-archives)
@@ -432,6 +433,52 @@ out so it never becomes permanent chrome.
 Every part of it is tunable in `[crawl]`; see the
 [configuration reference](#configuration-reference).
 
+### Momentum — keep writing or it locks
+
+View → **Momentum**. While it's on, a pause longer than a few seconds (three
+by default) locks the document.
+
+That sounds hostile, and it's meant to be — mildly. A first draft stalls when
+you stop to judge the sentence you just wrote, and the cure writers actually
+use is freewriting: keep the hand moving and fix it later. Momentum makes
+stopping cost something, so the easiest path is forward.
+
+**Nothing is destroyed by it.** Locking runs the ordinary lock path, so unsaved
+text is encrypted into the [stash](#locking-and-the-encrypted-stash) before the
+plaintext is dropped. The penalty is having to unlock and find your thread
+again — never lost words. For the same reason it refuses to switch on for a
+document with no key to stash to: there the lock would just be deferred and the
+mode would look broken. Save the file once, or set a stash key, and it arms.
+
+A countdown sits near the bottom of the window the whole time the mode is armed
+and the editor is open — full while you have time, calm until it's nearly out
+of it. It's drawn as its own overlay rather than in the status bar specifically
+so it survives **focus mode**; the two are meant to be used together, and focus
+mode has no status bar to put it in.
+
+The grace period grants time rather than postponing the reckoning: seconds
+spent inside it aren't counted against the pause, so when it ends you get the
+whole pause back, visibly.
+
+Three settings, under Settings → Momentum:
+
+| Setting | Default | What it does |
+|---|---|---|
+| Pause | `3s` | How long you may stop before it locks (1–60s) |
+| Grace | `5s` | Breathing room after switching it on before the timer starts. Coming back to the editor — from a lock, a dialog, or the edit shortcut — gets three times this, because restarting is harder than starting |
+| Countdown | on | Turn it off to make the pressure implicit; it still locks |
+
+Only typing counts — mouse movement keeps the idle auto-lock at bay but not
+this one, since jiggling the mouse isn't writing. And it only counts while the
+editor is open: a document you're reading was never gathering momentum.
+
+The mode is per session and never persisted. A setting that locks your
+document on a pause shouldn't be inherited from the last time the app ran.
+
+> **What it's for.** Morning pages. A first draft you keep rewriting the
+> opening of. Any writing where the problem is not what to say but the habit of
+> stopping to check.
+
 ### Locking, and the encrypted stash
 
 Schl8 locks itself after an idle period (default 5 minutes), on system sleep or
@@ -513,6 +560,12 @@ contrast-checked by a test, so none of them ships unreadable.
 
 **Focus mode** (`Ctrl+Cmd+F`) — fullscreen, chrome hidden, text in a readable
 column.
+
+**Keyboard Shortcuts** (View → Keyboard Shortcuts) — a floating list of the
+shortcuts that work *right now*, read from your own bindings and your keyboard
+layout, and filtered by what the app is doing. The motion keys are hidden in
+edit mode, where those letters are text rather than commands, and named
+correctly on Dvorak, Colemak and Workman, where they aren't `j`/`k`.
 
 **Interface scale** — the "Font size" slider in Settings, which zooms the whole
 interface rather than only the body text, for high-density displays or tired
@@ -606,6 +659,7 @@ Settings window (`Cmd+,`); changes apply live.
 menu_bar_resident = true   # false disables the status item & global hotkeys
 auto_lock_minutes = 5      # idle minutes before locking (0 disables)
 lock_on_sleep = true       # also lock on system/display sleep & screen lock
+show_shortcuts = false     # shortcut list (View → Keyboard Shortcuts)
 show_stats = false         # live statistics card (View → Statistics)
 keyboard_layout = "qwerty" # qwerty · dvorak · colemak · workman (nav keys)
 post_save_command = ""     # shell command run after every save;
@@ -641,6 +695,11 @@ time_format = "%H:%M"
 # name = "worklog"
 # source = "/Users/you/Documents/Schl8/worklog.md.gpg"
 # hotkey = "ctrl+cmd+1"
+
+[momentum]                 # the writing mode; switched on per session
+pause_seconds = 3.0        # stop for longer than this and it locks (1-60)
+grace_seconds = 5.0        # breathing room before the timer starts counting
+show_countdown = true
 
 [crawl]
 speed = 40.0               # points per second

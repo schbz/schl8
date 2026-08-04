@@ -76,6 +76,32 @@ fn nav_keys(layout: Layout) -> NavKeys {
     }
 }
 
+/// The motion keys as the user will actually find them on the keyboard,
+/// for display.
+///
+/// The status bar used to advertise "j/k:scroll" to everyone, which is a
+/// lie on three of the four supported layouts — on Dvorak those motions
+/// live on h and t. Anything that tells someone which key to press has
+/// to ask the layout rather than assume QWERTY.
+pub struct NavLabels {
+    pub down: &'static str,
+    pub up: &'static str,
+    pub pgdn: &'static str,
+    pub pgup: &'static str,
+    pub goto: &'static str,
+}
+
+pub fn nav_labels(layout: Layout) -> NavLabels {
+    let k = nav_keys(layout);
+    NavLabels {
+        down: k.down.name(),
+        up: k.up.name(),
+        pgdn: k.pgdn.name(),
+        pgup: k.pgup.name(),
+        goto: k.goto.name(),
+    }
+}
+
 /// Map an egui key event to a navigation Action for the given layout.
 /// Arrow/Page/Home/End keys are always available and layout-independent.
 pub fn map_key(key: Key, modifiers: &Modifiers, layout: Layout) -> Option<Action> {

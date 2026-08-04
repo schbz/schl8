@@ -196,6 +196,8 @@ pub struct App {
     stats_cache: crate::document::stats::StatsCache,
     /// Cache of the opened file's on-disk hash + mtime for the status bar.
     file_stamp: FileStampCache,
+    /// Lock-on-pause writing mode. Session-only, like focus mode.
+    momentum: crate::ui::momentum::Momentum,
     /// The fingerprint this file had when it was last opened, when
     /// that differs from what is on disk now. Held for as long as the
     /// document stays open, so the status bar can keep saying so.
@@ -325,6 +327,7 @@ impl App {
             last_activity: None,
             stats_cache: crate::document::stats::StatsCache::default(),
             file_stamp: FileStampCache::default(),
+            momentum: crate::ui::momentum::Momentum::default(),
             fingerprint_changed: None,
             recent_stamps: RecentStamps::default(),
             gpg_available: crate::crypto::gpg::gpg_available(),
@@ -3422,6 +3425,46 @@ impl eframe::App for App {
             if !unsaved_work {
                 self.lock_deferred_notified = false;
             }
+
+            // ── Momentum ─────────────────────────────────────────────
+            // A separate clock from the idle lock above, answering a
+            // different question: that one asks whether you walked
+            // away, this one asks whether you stopped writing.
+            if self.momentum.enabled {
+                let editing = self.is_editing();
+                // Only real typing counts. Pointer movement keeps the
+                // idle timer alive but is not writing, and treating it
+                // as such would let the mode be defeated by jiggling
+                // the mouse.
+                let typed = ctx.input(|i| {
+                    i.events.iter().any(|e| {
+                        matches!(
+                            e,
+                            egui::Event::Text(_)
+                                | egui::Event::Paste(_)
+                                | egui::Event::Key { pressed: true, .. }
+                        )
+                    })
+                });
+                if typed {
+                    self.momentum.saw_input(now);
+                }
+                if editing {
+                    // Per-second repaint so the countdown ticks and the
+                    // lock happens on time with no input at all.
+                    ctx.request_repaint_after(std::time::Duration::from_millis(100));
+                }
+                if self.momentum.step(now, editing, &self.config.momentum)
+                    == crate::ui::momentum::Step::Expired
+                {
+                    self.lock_session(ctx);
+                    self.show_toast(
+                        "Momentum: you stopped, so it locked. Your text was stashed.".to_string(),
+                        true,
+                        ctx,
+                    );
+                }
+            }
         }
 
         // ── Dock icon clicked with no window showing ─────────────────────
@@ -3811,6 +3854,8 @@ impl eframe::App for App {
             is_editing,
             can_save,
             show_stats: self.config.app.show_stats,
+            show_shortcuts: self.config.app.show_shortcuts,
+            momentum: self.momentum.enabled,
             focus_mode: self.focus_mode,
             allow_copy: self.allow_copy,
             word_wrap: self.config.appearance.word_wrap,
@@ -4007,6 +4052,38 @@ impl eframe::App for App {
                 menu::MenuAction::ToggleStats => {
                     self.config.app.show_stats = !self.config.app.show_stats;
                     let _ = self.config.save();
+                }
+                menu::MenuAction::ToggleShortcuts => {
+                    self.config.app.show_shortcuts = !self.config.app.show_shortcuts;
+                    let _ = self.config.save();
+                }
+                menu::MenuAction::ToggleMomentum => {
+                    if self.momentum.enabled {
+                        self.momentum.disarm();
+                        self.show_toast("Momentum off".to_string(), false, ctx);
+                    } else if !self.can_secure_unsaved_work() {
+                        // Arming here would lock on the first pause, find
+                        // no key to stash to, and defer forever — the mode
+                        // would look broken rather than strict.
+                        self.show_toast(
+                            "Momentum needs somewhere to put your text when it locks. \
+                             Save this file once, or set a stash key in Settings \u{203A} \
+                             Security, and turn it on again."
+                                .to_string(),
+                            true,
+                            ctx,
+                        );
+                    } else {
+                        let now = ctx.input(|i| i.time);
+                        let editing = self.is_editing();
+                        self.momentum.arm(now, editing, &self.config.momentum);
+                        let secs = self.config.momentum.pause_seconds;
+                        self.show_toast(
+                            format!("Momentum on — keep typing, or it locks after {secs:.0}s"),
+                            false,
+                            ctx,
+                        );
+                    }
                 }
                 menu::MenuAction::ToggleFocus => {
                     self.focus_mode = !self.focus_mode;
@@ -4880,6 +4957,27 @@ impl eframe::App for App {
             State::ViewingArchive { archive, .. } => self.file_stamp.get(&archive.source_path),
             _ => None,
         };
+        // Seconds until the idle auto-lock. Held back until the user has
+        // been idle a while: a counter that starts the instant you stop
+        // typing is a distraction from the writing, and one that only
+        // appears with seconds left is a jump scare. Thirty seconds in is
+        // late enough to mean "you have stopped" and early enough to be
+        // a warning rather than an announcement.
+        const COUNTDOWN_AFTER_IDLE: f64 = 30.0;
+        let lock_in = {
+            let limit_min = self.config.app.auto_lock_minutes;
+            let idle = self
+                .last_activity
+                .map(|last| ctx.input(|i| i.time) - last)
+                .unwrap_or(0.0);
+            (limit_min > 0 && self.document_open() && idle >= COUNTDOWN_AFTER_IDLE)
+                .then(|| (limit_min as f64 * 60.0 - idle).max(0.0) as f32)
+        };
+        // While it is on screen it has to actually tick.
+        if lock_in.is_some() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(250));
+        }
+
         // Recorded once when the document opened, not recomputed here:
         // the moment the user saves, the file legitimately differs from
         // what it was, and a per-frame comparison would start shouting
@@ -4946,6 +5044,7 @@ impl eframe::App for App {
                 keybindings::Layout::parse(&self.config.app.keyboard_layout),
                 stamp.as_ref(),
                 fingerprint_changed,
+                lock_in,
                 unsaved_unprotected,
                 view_opts,
                 &mut self.pending_jump,
@@ -4977,6 +5076,7 @@ impl eframe::App for App {
                 keybindings::Layout::parse(&self.config.app.keyboard_layout),
                 stamp.as_ref(),
                 fingerprint_changed,
+                lock_in,
                 unsaved_unprotected,
                 view_opts,
                 &mut self.pending_jump,
@@ -5007,6 +5107,38 @@ impl eframe::App for App {
         // ── Live statistics card (View → Statistics) ─────────────────────
         if self.config.app.show_stats {
             self.render_stats_card(ctx);
+        }
+
+        // ── Shortcut reference (View → Keyboard Shortcuts) ───────────────
+        // Hidden in focus mode and while crawling for the same reason the
+        // menu and status bars are: those modes are the whole window.
+        if self.config.app.show_shortcuts && !self.focus_mode && !self.crawl.active {
+            crate::ui::shortcuts_card::show(
+                ctx,
+                &self.config,
+                &crate::ui::shortcuts_card::Context {
+                    has_document: self.document_open(),
+                    is_editing: self.is_editing(),
+                    crawling: self.crawl.active,
+                    gpg_available: self.gpg_available,
+                },
+            );
+        }
+
+        // ── Momentum countdown ───────────────────────────────────────────
+        // Drawn as its own overlay rather than in the status bar, because
+        // this mode is meant to be used with focus mode, where there is
+        // no status bar to put it in.
+        if self.config.momentum.show_countdown {
+            let now = ctx.input(|i| i.time);
+            let editing = self.is_editing();
+            if let Some(left) = self.momentum.remaining(now, editing, &self.config.momentum) {
+                let urgency = self
+                    .momentum
+                    .urgency(now, editing, &self.config.momentum)
+                    .unwrap_or(0.0);
+                render_momentum_countdown(ctx, left, urgency);
+            }
         }
 
         // ── Render toast notification ────────────────────────────────────
@@ -5519,8 +5651,12 @@ fn render_file_picker(
                     ui.add_space(22.0);
                 }
 
+                // Not "Open Encrypted File": this same button opens plain
+                // .md and .txt (which are encrypted on their first save)
+                // and folder vaults, so naming it after one of the three
+                // told two thirds of the truth.
                 let button = egui::Button::new(
-                    egui::RichText::new("  Open Encrypted File  ")
+                    egui::RichText::new("  Open a Note or Vault  ")
                         .size(16.0)
                         .color(theme::badge_text()),
                 )
@@ -5836,6 +5972,60 @@ fn render_list_rows(ui: &mut egui::Ui, rows: &[ListRow], transition: &mut Transi
 /// the menu buttons; anything more is wasted chrome.
 const MENU_BAR_REVEAL_INSET: f32 = 26.0;
 
+/// The Momentum countdown: a bar that drains, and the seconds left.
+///
+/// Bottom-centre and deliberately quiet until it is nearly out of time.
+/// The point of the mode is to keep your eyes on the sentence, so a
+/// number that shouts from the first second would defeat it — the colour
+/// carries the urgency instead, and only at the end.
+fn render_momentum_countdown(ctx: &egui::Context, left: f32, urgency: f32) {
+    let calm = theme::accent();
+    let alarm = theme::accent_red();
+    let mix = |a: egui::Color32, b: egui::Color32, t: f32| {
+        let m = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round() as u8;
+        egui::Color32::from_rgb(m(a.r(), b.r()), m(a.g(), b.g()), m(a.b(), b.b()))
+    };
+    // Squared, so the shift to red happens late rather than steadily —
+    // it should read as "now" and not as a slow slide.
+    let color = mix(calm, alarm, urgency * urgency);
+
+    egui::Area::new(egui::Id::new("momentum_countdown"))
+        .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -18.0))
+        .order(egui::Order::Foreground)
+        .interactable(false)
+        .show(ctx, |ui| {
+            egui::Frame::NONE
+                .fill(theme::bg_raised().gamma_multiply(0.92))
+                .stroke(egui::Stroke::new(1.0, color.gamma_multiply(0.6)))
+                .corner_radius(theme::RADIUS)
+                .inner_margin(egui::Margin::symmetric(12, 7))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new("Momentum")
+                                .size(11.0)
+                                .color(theme::text_dim()),
+                        );
+                        ui.label(
+                            egui::RichText::new(format!("{left:.1}s"))
+                                .size(13.0)
+                                .monospace()
+                                .strong()
+                                .color(color),
+                        );
+                    });
+                    // The bar drains left to right as the pause runs out.
+                    let (rect, _) =
+                        ui.allocate_exact_size(egui::vec2(160.0, 4.0), egui::Sense::hover());
+                    let p = ui.painter();
+                    p.rect_filled(rect, 2.0, theme::bg_primary());
+                    let mut filled = rect;
+                    filled.set_width(rect.width() * (1.0 - urgency).clamp(0.0, 1.0));
+                    p.rect_filled(filled, 2.0, color);
+                });
+        });
+}
+
 /// The project's GitHub issue tracker (pre-filled for a bug report).
 const ISSUES_URL: &str =
     "https://github.com/schbz/schl8/issues/new?labels=bug&template=bug_report.md";
@@ -5914,6 +6104,8 @@ fn render_viewing(
     // The fingerprint this file had when it was last opened, when that
     // differs from what is on disk now.
     fingerprint_changed: Option<&crate::ui::fingerprint::Fingerprint>,
+    // Seconds until the idle auto-lock fires, once idle long enough.
+    lock_in: Option<f32>,
     // True when unsaved edits exist that cannot be encrypted into the
     // lock stash — an unsaved new file has no key of its own.
     unsaved_unprotected: bool,
@@ -6031,6 +6223,7 @@ fn render_viewing(
                     unsaved_unprotected,
                     stamp,
                     fingerprint_changed,
+                    lock_in,
                     compact,
                 )
             })
@@ -6121,6 +6314,8 @@ fn render_viewing_archive(
     // The fingerprint this file had when it was last opened, when that
     // differs from what is on disk now.
     fingerprint_changed: Option<&crate::ui::fingerprint::Fingerprint>,
+    // Seconds until the idle auto-lock fires, once idle long enough.
+    lock_in: Option<f32>,
     // See `render_viewing`.
     unsaved_unprotected: bool,
     opts: viewer::ViewOptions,
@@ -6414,6 +6609,7 @@ fn render_viewing_archive(
                     unsaved_unprotected,
                     stamp,
                     fingerprint_changed,
+                    lock_in,
                     compact,
                 )
             })

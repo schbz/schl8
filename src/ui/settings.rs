@@ -245,6 +245,110 @@ impl SettingsDialog {
                 ui.add_space(6.0);
                 ui.separator();
 
+                // ── Security: when the session locks ─────────────────
+                ui.label(
+                    RichText::new("Locking")
+                        .size(15.0)
+                        .strong()
+                        .color(theme::text_strong()),
+                );
+                ui.label(
+                    RichText::new(
+                        "How long the document stays open when you are not using it. \
+                         Once the countdown passes half a minute the status bar shows \
+                         what is left, and any keypress or mouse movement resets it.",
+                    )
+                    .size(11.5)
+                    .color(theme::text_dim()),
+                );
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    ui.add(
+                        egui::DragValue::new(&mut self.draft.app.auto_lock_minutes)
+                            .range(0..=1440)
+                            .suffix(" min"),
+                    )
+                    .on_hover_text("0 = never lock on idle");
+                    ui.label(
+                        RichText::new("Lock after this long with no input (0 = never)")
+                            .size(12.5)
+                            .color(theme::text_primary()),
+                    );
+                });
+                ui.checkbox(
+                    &mut self.draft.app.lock_on_sleep,
+                    RichText::new("Also lock when the display sleeps or the screen locks")
+                        .size(12.5)
+                        .color(theme::text_primary()),
+                );
+
+                ui.add_space(6.0);
+                ui.separator();
+
+                // ── Momentum ─────────────────────────────────────────
+                ui.label(
+                    RichText::new("Momentum")
+                        .size(15.0)
+                        .strong()
+                        .color(theme::text_strong()),
+                );
+                ui.label(
+                    RichText::new(
+                        "A writing mode, switched on per session from View \u{203A} \
+                         Momentum. While it is on, a pause longer than this locks the \
+                         document — unsaved text is stashed encrypted first, so nothing \
+                         is lost, but you have to unlock to carry on. For first drafts, \
+                         where stopping to judge the last sentence is the thing that \
+                         stops you writing the next one.",
+                    )
+                    .size(11.5)
+                    .color(theme::text_dim()),
+                );
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    ui.add(
+                        egui::DragValue::new(&mut self.draft.momentum.pause_seconds)
+                            .range(
+                                crate::config::MIN_MOMENTUM_PAUSE
+                                    ..=crate::config::MAX_MOMENTUM_PAUSE,
+                            )
+                            .speed(0.1)
+                            .suffix(" s"),
+                    )
+                    .on_hover_text("How long you may pause before it locks");
+                    ui.label(
+                        RichText::new("Lock after a pause this long")
+                            .size(12.5)
+                            .color(theme::text_primary()),
+                    );
+                });
+                ui.horizontal(|ui| {
+                    ui.add(
+                        egui::DragValue::new(&mut self.draft.momentum.grace_seconds)
+                            .range(0.0..=crate::config::MAX_MOMENTUM_PAUSE)
+                            .speed(0.1)
+                            .suffix(" s"),
+                    )
+                    .on_hover_text(
+                        "Breathing room after switching the mode on, or after \
+                         unlocking back into it, before the timer starts counting",
+                    );
+                    ui.label(
+                        RichText::new("Grace period before it starts counting")
+                            .size(12.5)
+                            .color(theme::text_primary()),
+                    );
+                });
+                ui.checkbox(
+                    &mut self.draft.momentum.show_countdown,
+                    RichText::new("Show the countdown while it runs")
+                        .size(12.5)
+                        .color(theme::text_primary()),
+                );
+
+                ui.add_space(6.0);
+                ui.separator();
+
                 // ── Security: held edits ─────────────────────────────
                 ui.label(
                     RichText::new("Unsaved edits when the session locks")

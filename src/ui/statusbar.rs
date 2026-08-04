@@ -67,6 +67,21 @@ pub fn format_size(bytes: u64) -> String {
     }
 }
 
+/// A countdown as `m:ss` once there is a minute or more left, plain
+/// seconds below that.
+///
+/// Seconds all the way up would read as a wall of digits at five
+/// minutes; `m:ss` all the way down puts a leading `0:` in front of the
+/// part that actually matters.
+fn format_countdown(secs: f32) -> String {
+    let secs = secs.max(0.0).round() as u32;
+    if secs >= 60 {
+        format!("{}:{:02}", secs / 60, secs % 60)
+    } else {
+        format!("{secs}s")
+    }
+}
+
 /// Below this width the bar lays out as two rows instead of one.
 ///
 /// Edit mode needs far more: four buttons plus a hint, against a view
@@ -128,6 +143,10 @@ pub fn render(
     // was recorded and it differs from what is on disk now. Some(_) is
     // the interesting case: the file changed while you weren't looking.
     previous: Option<&Fingerprint>,
+    // Seconds until the idle auto-lock fires, once the user has been
+    // idle long enough for it to be worth saying. None when auto-lock is
+    // off, nothing is open, or they were typing a moment ago.
+    lock_in: Option<f32>,
     // Two-row layout, decided by the caller so the panel height matches.
     compact: bool,
 ) -> Option<StatusAction> {
@@ -311,7 +330,7 @@ pub fn render(
         // Buttons first and wrapped: at narrow widths they take as many
         // rows as they need rather than running off the edge.
         ui.horizontal_wrapped(|ui| {
-            if let Some(a) = render_actions(ui, is_editing, false) {
+            if let Some(a) = render_actions(ui, is_editing, lock_in) {
                 action = Some(a);
             }
         });
@@ -324,7 +343,7 @@ pub fn render(
             // as this did — let a long filename consume the whole row and
             // leave the buttons drawing on top of it.
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if let Some(a) = render_actions(ui, is_editing, true) {
+                if let Some(a) = render_actions(ui, is_editing, lock_in) {
                     action = Some(a);
                 }
                 ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
@@ -337,11 +356,14 @@ pub fn render(
     action
 }
 
-/// The right-hand action buttons. `show_hints` adds the keybinding hint
-/// text, which is dropped when the bar is laid out in compact (two-row)
-/// mode. Both modes offer the same "Save Options…" entry point so the
-/// save plan (keys, destinations, post-save hook) is reachable either way.
-fn render_actions(ui: &mut Ui, is_editing: bool, show_hints: bool) -> Option<StatusAction> {
+/// The right-hand action buttons.
+///
+/// No keybinding hints live here any more. Two fixed strings used to:
+/// they named QWERTY motion keys to everyone regardless of layout, and
+/// named `Cmd+E` regardless of what the user had rebound it to. The
+/// shortcut list is now its own panel (View \u{203A} Keyboard Shortcuts),
+/// built from the live config and from what the app is actually doing.
+fn render_actions(ui: &mut Ui, is_editing: bool, lock_in: Option<f32>) -> Option<StatusAction> {
     let mut action = None;
     if is_editing {
         // "Encrypt & Save" button
@@ -429,15 +451,29 @@ fn render_actions(ui: &mut Ui, is_editing: bool, show_hints: bool) -> Option<Sta
             action = Some(StatusAction::PanicLock);
         }
 
-        ui.add_space(8.0);
-
-        // The hint is the first thing to go: it is a convenience, and
-        // the buttons beside it are not.
-        if show_hints && ui.available_width() > 220.0 {
+        // What the button would do anyway, and when. Only once the idle
+        // stretch is long enough to mean something: a counter that runs
+        // from the moment you stop to think is a distraction, and one
+        // that appears with four seconds left is a jump scare.
+        if let Some(secs) = lock_in {
+            ui.add_space(6.0);
+            // Red only at the very end, so it reads as information for
+            // most of its life and as a warning exactly when it is one.
+            let color = if secs <= 10.0 {
+                theme::accent_red()
+            } else {
+                theme::text_dim()
+            };
             ui.label(
-                RichText::new("Cmd+E: exit edit")
-                    .color(theme::text_dim())
-                    .size(theme::FONT_SIZE_STATUS),
+                RichText::new(format!("locks in {}", format_countdown(secs)))
+                    .size(theme::FONT_SIZE_STATUS)
+                    .monospace()
+                    .color(color),
+            )
+            .on_hover_text(
+                "Time left before the session locks by itself for being idle. \
+                 Any keypress or mouse movement resets it; the timeout is in \
+                 Settings \u{203A} Security.",
             );
         }
     } else {
@@ -481,16 +517,6 @@ fn render_actions(ui: &mut Ui, is_editing: bool, show_hints: bool) -> Option<Sta
         }
 
         ui.add_space(8.0);
-
-        if show_hints && ui.available_width() > 340.0 {
-            // Keybinding hints only when there's room (long paths in
-            // archive mode would otherwise collide with the left side)
-            ui.label(
-                RichText::new("j/k:scroll  d/u:page  g/G:top/end  Cmd+E:edit  q:quit")
-                    .color(theme::text_dim())
-                    .size(theme::FONT_SIZE_STATUS),
-            );
-        }
     }
     action
 }
@@ -539,6 +565,18 @@ mod tests {
         // real assertion rather than a const clippy can fold away.
         let (edit, view) = (COMPACT_WIDTH_EDIT, COMPACT_WIDTH);
         assert!(edit > view, "edit mode must go compact sooner");
+    }
+
+    #[test]
+    fn countdowns_read_as_clocks_only_when_worth_it() {
+        assert_eq!(format_countdown(300.0), "5:00");
+        assert_eq!(format_countdown(61.0), "1:01");
+        assert_eq!(format_countdown(60.0), "1:00");
+        assert_eq!(format_countdown(59.4), "59s");
+        assert_eq!(format_countdown(1.0), "1s");
+        // Never a negative or a minus sign, whatever the clock does.
+        assert_eq!(format_countdown(0.0), "0s");
+        assert_eq!(format_countdown(-5.0), "0s");
     }
 
     #[test]

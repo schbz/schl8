@@ -13,6 +13,10 @@ pub enum MenuAction {
     PanicLock,
     /// Toggle the animated reading (crawl) mode.
     ToggleCrawl,
+    /// Toggle the floating keyboard-shortcut list.
+    ToggleShortcuts,
+    /// Toggle Momentum: lock the document if typing stops.
+    ToggleMomentum,
     /// Show a copyable instruction block for an AI assistant, by index
     /// into `agent_help::all()`.
     AgentHelp(usize),
@@ -60,6 +64,8 @@ pub struct MenuFlags {
     pub can_save: bool,
     /// Checkmark states for the View menu.
     pub show_stats: bool,
+    pub show_shortcuts: bool,
+    pub momentum: bool,
     pub focus_mode: bool,
     pub allow_copy: bool,
     pub word_wrap: bool,
@@ -78,6 +84,8 @@ pub fn render(ui: &mut Ui, flags: MenuFlags) -> Option<MenuAction> {
         is_editing,
         can_save,
         show_stats,
+        show_shortcuts,
+        momentum,
         focus_mode,
         allow_copy,
         word_wrap,
@@ -244,9 +252,39 @@ pub fn render(ui: &mut Ui, flags: MenuFlags) -> Option<MenuAction> {
                 action = Some(MenuAction::ToggleStats);
                 ui.close_menu();
             }
+            let mut shortcuts = show_shortcuts;
+            if ui
+                .checkbox(&mut shortcuts, "Keyboard Shortcuts")
+                .on_hover_text(
+                    "A list of the shortcuts that work right now, read from your own \
+                     bindings and your keyboard layout",
+                )
+                .clicked()
+            {
+                action = Some(MenuAction::ToggleShortcuts);
+                ui.close_menu();
+            }
             let mut focus = focus_mode;
             if ui.checkbox(&mut focus, "Focus Mode\tCtrl+Cmd+F").clicked() {
                 action = Some(MenuAction::ToggleFocus);
+                ui.close_menu();
+            }
+            let mut keep_going = momentum;
+            if ui
+                .add_enabled(
+                    has_document,
+                    egui::Checkbox::new(&mut keep_going, "Momentum"),
+                )
+                .on_hover_text(
+                    "Keep writing or the session locks. While this is on, a pause \
+                     longer than the configured few seconds locks the document — \
+                     unsaved text is stashed encrypted first, so nothing is lost, \
+                     but you have to unlock to carry on. For first drafts, when \
+                     stopping to judge a sentence is the thing stopping you.",
+                )
+                .clicked()
+            {
+                action = Some(MenuAction::ToggleMomentum);
                 ui.close_menu();
             }
             if ui
