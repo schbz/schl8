@@ -39,7 +39,7 @@ tar = "0.4"
 
 # Config file (~/.config/schl8/config.toml)
 serde = { version = "1", features = ["derive"] }
-toml = "0.8"
+toml = "1.1"
 
 # Timestamps for quick-note templates
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
