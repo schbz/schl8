@@ -32,13 +32,17 @@ pub struct Context {
 }
 
 /// Render the shortcut reference overlay.
+/// Movable, like the statistics card: drag it anywhere; the dropped
+/// position sticks for the session.
 pub fn show(ctx: &egui::Context, config: &Config, state: &Context) {
     egui::Area::new(egui::Id::new("shortcuts_card"))
-        // Left, so it never fights the statistics card for the same
-        // corner when both are on.
-        .anchor(Align2::LEFT_TOP, egui::vec2(14.0, 44.0))
+        // Starts on the left, so it never fights the statistics card
+        // for the same corner when both are on.
+        .default_pos(egui::pos2(14.0, 44.0))
+        .pivot(Align2::LEFT_TOP)
+        .movable(true)
+        .constrain(true)
         .order(egui::Order::Foreground)
-        .interactable(false)
         .show(ctx, |ui| {
             egui::Frame::NONE
                 .fill(theme::bg_raised().gamma_multiply(0.92))

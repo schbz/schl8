@@ -198,6 +198,14 @@ pub struct App {
     file_stamp: FileStampCache,
     /// Lock-on-pause writing mode. Session-only, like focus mode.
     momentum: crate::ui::momentum::Momentum,
+    /// Momentum applied to the jot window, armed per quicknote.
+    jot_momentum: crate::ui::momentum::Momentum,
+    /// Length of the jot text last frame, so typing can be detected as
+    /// a content change rather than by guessing at event routing across
+    /// viewports.
+    jot_seen_len: usize,
+    /// "That file is not there any more" — with the copies that are.
+    missing_file: crate::ui::missing_file::MissingFileDialog,
     /// The fingerprint this file had when it was last opened, when
     /// that differs from what is on disk now. Held for as long as the
     /// document stays open, so the status bar can keep saying so.
@@ -328,6 +336,9 @@ impl App {
             stats_cache: crate::document::stats::StatsCache::default(),
             file_stamp: FileStampCache::default(),
             momentum: crate::ui::momentum::Momentum::default(),
+            jot_momentum: crate::ui::momentum::Momentum::default(),
+            jot_seen_len: 0,
+            missing_file: crate::ui::missing_file::MissingFileDialog::default(),
             fingerprint_changed: None,
             recent_stamps: RecentStamps::default(),
             gpg_available: crate::crypto::gpg::gpg_available(),
@@ -1496,6 +1507,18 @@ impl App {
             .map(|n| (n.name.clone(), n.source.clone()))
             .collect();
         let wants_focus = self.jot.wants_focus();
+        // The countdown shown inside the jot, computed here because the
+        // viewport closure borrows the jot mutably and the momentum
+        // state lives beside it on self.
+        let jot_now = ctx.input(|i| i.time);
+        let jot_counting = self.jot.open && !self.jot.busy;
+        let jot_momentum_display = self
+            .jot_momentum
+            .remaining(jot_now, jot_counting, &self.config.momentum)
+            .zip(
+                self.jot_momentum
+                    .urgency(jot_now, jot_counting, &self.config.momentum),
+            );
         let jot = &mut self.jot;
         let mut action = quicknote::JotAction::None;
         let mut seen_rect: Option<(egui::Pos2, egui::Vec2)> = None;
@@ -1552,7 +1575,7 @@ impl App {
                         );
                         theme::paint_accent_gradient(ui.painter(), line);
 
-                        action = jot.render_contents(ui, &notes);
+                        action = jot.render_contents(ui, &notes, jot_momentum_display);
                     });
             },
         );
@@ -3426,6 +3449,67 @@ impl eframe::App for App {
                 self.lock_deferred_notified = false;
             }
 
+            // ── Momentum for the jot ─────────────────────────────────
+            // Armed per quicknote: a note flagged for it turns every jot
+            // into a self-finishing capture. The pause appends what you
+            // wrote, or closes the window if you wrote nothing — you
+            // either made the note or you didn't, and either way you are
+            // back where you were with no decision to make.
+            {
+                let target_momentum = self.jot.open
+                    && self
+                        .jot
+                        .selected_target
+                        .as_ref()
+                        .and_then(|t| self.config.quick_note.notes.iter().find(|n| &n.source == t))
+                        .is_some_and(|n| n.momentum);
+                if target_momentum && !self.jot_momentum.enabled {
+                    // `editing: true`, so the plain grace applies rather
+                    // than the longer resume one — the window opened
+                    // focused with the caret already in the field.
+                    self.jot_momentum.arm(now, true, &self.config.momentum);
+                    self.jot_seen_len = self.jot.text().len();
+                } else if !target_momentum && self.jot_momentum.enabled {
+                    // Closed, went busy, or retargeted to a plain note.
+                    self.jot_momentum.disarm();
+                }
+                if self.jot_momentum.enabled {
+                    // Typing is detected as a content change rather than
+                    // from raw events: the jot is its own viewport, and
+                    // watching the text sidesteps every question about
+                    // which window's events these are. Deletions count —
+                    // erasing a word is still working on the note.
+                    let len = self.jot.text().len();
+                    if len != self.jot_seen_len {
+                        self.jot_seen_len = len;
+                        self.jot_momentum.saw_input(now);
+                    }
+                    let counting = self.jot.open && !self.jot.busy;
+                    ctx.request_repaint_after(std::time::Duration::from_millis(100));
+                    if self.jot_momentum.step(now, counting, &self.config.momentum)
+                        == crate::ui::momentum::Step::Expired
+                    {
+                        self.jot_momentum.disarm();
+                        match crate::ui::quicknote::expiry_outcome(self.jot.text()) {
+                            crate::ui::quicknote::JotOutcome::Cancel => {
+                                self.jot.open = false;
+                                self.jot.clear_text();
+                                self.show_toast(
+                                    "Jot closed — nothing was typed, nothing was saved".to_string(),
+                                    false,
+                                    ctx,
+                                );
+                            }
+                            crate::ui::quicknote::JotOutcome::Submit => {
+                                // Exactly the Enter path: encrypt-append to
+                                // the note's destinations, then close.
+                                self.submit_jot(ctx);
+                            }
+                        }
+                    }
+                }
+            }
+
             // ── Momentum ─────────────────────────────────────────────
             // A separate clock from the idle lock above, answering a
             // different question: that one asks whether you walked
@@ -4921,6 +5005,14 @@ impl eframe::App for App {
             }
         }
 
+        // Missing-file alert: the chosen surviving copy re-enters the
+        // same open funnel it came from, now with a path that exists.
+        if let crate::ui::missing_file::MissingAction::OpenAlternate(alt) =
+            self.missing_file.render(ctx)
+        {
+            transition = Transition::StartDecrypt(alt);
+        }
+
         // Quit confirmation dialog (unsaved edits)
         if self.quit_dialog.render(ctx) {
             self.allow_close = true;
@@ -5230,10 +5322,19 @@ impl eframe::App for App {
         // ── Apply transitions ────────────────────────────────────────────
         match transition {
             Transition::StartDecrypt(path) => {
-                // age files decrypt synchronously on this thread with the
-                // in-memory identity (fast, no subprocess/PIN). GPG and
-                // plaintext keep the background path.
-                if crate::document::loader::is_age_file(&path) {
+                // A path that is not there any more gets an explanation,
+                // not a decrypt attempt. Every open in the app funnels
+                // through this transition — tray, favorites, recents,
+                // Finder — so this is the one place the check covers
+                // them all. The dialog offers whatever surviving copies
+                // the save plans and quicknote rules know about.
+                if !path.exists() {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                    self.main_visible = true;
+                    let alternates = self.config.alternate_locations(&path);
+                    self.missing_file.show(path, alternates);
+                } else if crate::document::loader::is_age_file(&path) {
                     self.open_age_file(&path, ctx);
                 } else {
                     let receiver = spawn_decrypt(path.clone());

@@ -584,6 +584,17 @@ impl QuickNotesManager {
                                 {
                                     capture_toggle = Some(ni);
                                 }
+
+                                ui.add_space(10.0);
+                                ui.checkbox(
+                                    &mut note.momentum,
+                                    RichText::new("Momentum")
+                                        .size(12.0)
+                                        .color(theme::text_primary()),
+                                )
+                                .on_hover_text(
+                                    "Jots into this note finish themselves: stop typing                                      for a few seconds (the Momentum pause in Settings)                                      and whatever you wrote is appended — or, if you                                      wrote nothing, the jot closes. Capture without a                                      decision: you either wrote the note or you didn't.",
+                                );
                             });
 
                             let mut remove_rule: Option<usize> = None;

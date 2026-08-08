@@ -25,11 +25,21 @@ pub struct FileMeta<'a> {
 }
 
 /// Render the stats card overlay.
+///
+/// Movable: drag it anywhere. It starts in the top-right corner and the
+/// position it is dropped at sticks for the session (egui remembers area
+/// positions by id). The cost of draggability is that the card now
+/// takes pointer input, so clicks on it no longer fall through to the
+/// document underneath — a fair trade for being able to move it off
+/// whatever it happens to be covering.
 pub fn show(ctx: &egui::Context, stats: &TextStats, meta: &FileMeta<'_>) {
+    let screen = ctx.screen_rect();
     egui::Area::new(egui::Id::new("stats_card"))
-        .anchor(Align2::RIGHT_TOP, egui::vec2(-14.0, 44.0))
+        .default_pos(egui::pos2(screen.right() - 14.0, 44.0))
+        .pivot(Align2::RIGHT_TOP)
+        .movable(true)
+        .constrain(true)
         .order(egui::Order::Foreground)
-        .interactable(false)
         .show(ctx, |ui| {
             egui::Frame::NONE
                 .fill(theme::bg_raised().gamma_multiply(0.92))

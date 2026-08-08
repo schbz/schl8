@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.44] - 2026-08-04
+
+### Added
+
+- **A missing file now says so — and says where else it is.** Opening a
+  file that was deleted or moved (from Favorites, the menu-bar
+  submenus, recents, anywhere) used to fail in silence, which reads as
+  the app being broken rather than the file being gone. Every open
+  funnels through one place, so one check now covers them all: an alert
+  names the missing location, and — since save plans and quicknote
+  rules fan each save out to several destinations — lists every other
+  copy the configuration knows about that still exists, each one click
+  from opening. A file nothing references gets an honest "no other
+  copies are known" rather than a guess.
+- **Per-quicknote Momentum.** A note flagged for it (File → Quick Note
+  Files… → Momentum) turns every jot into a self-finishing capture:
+  stop typing for the configured pause and whatever you wrote is
+  appended — or, if you wrote nothing, the jot closes. Whitespace
+  counts as nothing, because appending a stray space would timestamp an
+  empty entry into the note. A drain bar in the jot shows the deal
+  while it runs, along with which way a pause will go. Typing is
+  detected as content change, so it works regardless of how events
+  route between windows — and deleting counts, since erasing a word is
+  still working on the note.
+- **The statistics and keyboard-shortcut cards can be dragged
+  anywhere.** Where you drop one sticks for the session. The cost is
+  that the cards now take pointer input — clicks on them no longer fall
+  through to the document — which is a fair trade for being able to
+  move them off whatever they happen to be covering.
+
 ## [1.0.43] - 2026-08-02
 
 ### Added

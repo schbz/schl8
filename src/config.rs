@@ -40,6 +40,11 @@ pub struct QuickNoteFile {
     /// opens the jot window preselected on this file — handy for keypad
     /// macros that jot into a specific note. Empty = none.
     pub hotkey: String,
+    /// Jot with Momentum: while the jot targets this note, a pause
+    /// longer than the configured few seconds finishes the jot on its
+    /// own — typed text is appended, an empty jot is cancelled. Capture
+    /// without a decision: you either wrote the note or you didn't.
+    pub momentum: bool,
 }
 
 impl QuickNoteFile {
@@ -55,6 +60,7 @@ impl QuickNoteFile {
             source,
             rules: Vec::new(),
             hotkey: String::new(),
+            momentum: false,
         }
     }
 
@@ -1023,6 +1029,58 @@ impl Config {
     }
 
     /// The save plan for a document, if one is configured.
+    /// Every other place a copy of `missing` might exist, according to
+    /// this configuration — and only the ones actually on disk.
+    ///
+    /// A file that has vanished from its original location is not
+    /// necessarily gone: save plans and quicknote rules fan each save
+    /// out to several destinations, so the config is a map of where the
+    /// other copies were sent. Consulted by the missing-file alert, so
+    /// "it isn't there any more" can come with "but these are".
+    pub fn alternate_locations(&self, missing: &Path) -> Vec<PathBuf> {
+        let mut found: Vec<PathBuf> = Vec::new();
+        let mut push = |p: &Path| {
+            if p != missing && p.exists() && !found.iter().any(|f| f == p) {
+                found.push(p.to_path_buf());
+            }
+        };
+
+        // A group is related if the missing file is its source OR one of
+        // its destinations — deleting the working copy and deleting a
+        // backup are the same question from different ends.
+        for plan in &self.save_plans {
+            let related = plan.source == missing
+                || plan
+                    .rules
+                    .iter()
+                    .any(|r| r.destinations.iter().any(|d| d == missing));
+            if related {
+                push(&plan.source);
+                for rule in &plan.rules {
+                    for dest in &rule.destinations {
+                        push(dest);
+                    }
+                }
+            }
+        }
+        for note in &self.quick_note.notes {
+            let related = note.source == missing
+                || note
+                    .rules
+                    .iter()
+                    .any(|r| r.destinations.iter().any(|d| d == missing));
+            if related {
+                push(&note.source);
+                for rule in &note.rules {
+                    for dest in &rule.destinations {
+                        push(dest);
+                    }
+                }
+            }
+        }
+        found
+    }
+
     pub fn plan_for(&self, source: &Path) -> Option<&SavePlan> {
         self.save_plans.iter().find(|p| p.source == source)
     }
@@ -1410,6 +1468,7 @@ mod tests {
         cfg.set_quicknotes(vec![QuickNoteFile {
             name: "Journal".into(),
             source: PathBuf::from("/j.md.gpg"),
+            momentum: false,
             rules: vec![SaveRule {
                 key_fingerprint: "AB".repeat(20),
                 key_label: "Me".into(),
@@ -1540,6 +1599,114 @@ mod age_lock_tests {
         let toml = toml::to_string_pretty(&cfg).unwrap();
         let back: Config = toml::from_str(&toml).unwrap();
         assert_eq!(back.age_lock, cfg.age_lock);
+    }
+}
+
+/// Where else a vanished file's copies live, according to the config.
+#[cfg(test)]
+mod alternate_location_tests {
+    use super::*;
+
+    fn tmp(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("schl8-alt-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn rule(dests: &[&Path]) -> SaveRule {
+        SaveRule {
+            key_fingerprint: "F00D".into(),
+            destinations: dests.iter().map(|p| p.to_path_buf()).collect(),
+            ..Default::default()
+        }
+    }
+
+    /// The working copy vanished: the plan's surviving destinations are
+    /// the answer — and only the ones actually on disk.
+    #[test]
+    fn a_missing_source_offers_its_surviving_destinations() {
+        let dir = tmp("src");
+        let missing = dir.join("gone.md.gpg");
+        let backup = dir.join("backup.md.gpg");
+        let dead = dir.join("never-written.md.gpg");
+        std::fs::write(&backup, b"x").unwrap();
+
+        let mut cfg = Config::default();
+        cfg.save_plans.push(SavePlan {
+            source: missing.clone(),
+            rules: vec![rule(&[&backup, &dead])],
+            post_save_command: String::new(),
+        });
+
+        assert_eq!(cfg.alternate_locations(&missing), vec![backup]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The question works from either end: a deleted *backup* points
+    /// back at the surviving working copy.
+    #[test]
+    fn a_missing_destination_offers_the_source() {
+        let dir = tmp("dest");
+        let source = dir.join("working.md.gpg");
+        let missing = dir.join("deleted-backup.md.gpg");
+        std::fs::write(&source, b"x").unwrap();
+
+        let mut cfg = Config::default();
+        cfg.save_plans.push(SavePlan {
+            source: source.clone(),
+            rules: vec![rule(&[&missing])],
+            post_save_command: String::new(),
+        });
+
+        assert_eq!(cfg.alternate_locations(&missing), vec![source]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Quicknote rules are the other fan-out; their copies count too,
+    /// and a path reachable through both lists appears once.
+    #[test]
+    fn quicknote_rules_count_and_duplicates_do_not() {
+        let dir = tmp("qn");
+        let missing = dir.join("note.md.gpg");
+        let copy = dir.join("copy.md.gpg");
+        std::fs::write(&copy, b"x").unwrap();
+
+        let mut cfg = Config::default();
+        let mut note = QuickNoteFile::for_existing(missing.clone());
+        note.rules = vec![rule(&[&copy])];
+        cfg.quick_note.notes.push(note);
+        cfg.save_plans.push(SavePlan {
+            source: missing.clone(),
+            rules: vec![rule(&[&copy])],
+            post_save_command: String::new(),
+        });
+
+        assert_eq!(cfg.alternate_locations(&missing), vec![copy]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A file no plan or note mentions has no alternates: an empty list,
+    /// not a guess.
+    #[test]
+    fn an_unconfigured_file_has_no_alternates() {
+        let cfg = Config::default();
+        assert!(cfg
+            .alternate_locations(Path::new("/tmp/unrelated.gpg"))
+            .is_empty());
+    }
+
+    /// The new per-note momentum flag defaults off and survives disk.
+    #[test]
+    fn quicknote_momentum_defaults_off_and_round_trips() {
+        let mut cfg = Config::default();
+        let mut note = QuickNoteFile::for_existing(PathBuf::from("/tmp/a.gpg"));
+        assert!(!note.momentum, "must be opt-in");
+        note.momentum = true;
+        cfg.quick_note.notes.push(note);
+
+        let back: Config = toml::from_str(&toml::to_string_pretty(&cfg).unwrap()).unwrap();
+        assert!(back.quick_note.notes[0].momentum);
     }
 }
 

@@ -12,6 +12,30 @@ use super::theme;
 use crate::config::QuickNote;
 use crate::crypto::secure_buf::SecureString;
 
+/// What a Momentum expiry does to a jot.
+///
+/// The rule the feature was asked for by name: "if it locks before I
+/// type anything then the jot is canceled, otherwise whatever I have
+/// typed is saved." Whitespace counts as nothing — an accidental space
+/// or a stray newline is not a note, and appending it would timestamp
+/// an empty entry into the file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JotOutcome {
+    /// Nothing written: close the jot, save nothing.
+    Cancel,
+    /// Something written: append it, exactly as pressing Enter would.
+    Submit,
+}
+
+/// Decide what a pause should do with the jot's current text.
+pub fn expiry_outcome(text: &str) -> JotOutcome {
+    if text.trim().is_empty() {
+        JotOutcome::Cancel
+    } else {
+        JotOutcome::Submit
+    }
+}
+
 /// What the app should do after rendering the jot window this frame.
 pub enum JotAction {
     None,
@@ -149,7 +173,15 @@ impl JotWindow {
     /// Handles Esc (close) and Enter (submit) via `ui.ctx()`. `notes` are
     /// the registry entries as (display name, source path). Returns the
     /// action the app should take.
-    pub fn render_contents(&mut self, ui: &mut egui::Ui, notes: &[(String, PathBuf)]) -> JotAction {
+    /// `momentum` is Some((seconds_left, urgency)) while a Momentum
+    /// quicknote is counting down; the jot draws the same draining bar
+    /// the editor shows, so the deal is visible while you type.
+    pub fn render_contents(
+        &mut self,
+        ui: &mut egui::Ui,
+        notes: &[(String, PathBuf)],
+        momentum: Option<(f32, f32)>,
+    ) -> JotAction {
         let mut action = JotAction::None;
         let ctx = ui.ctx().clone();
 
@@ -199,6 +231,51 @@ impl JotWindow {
             .inner
         });
         let (close_clicked, close_rect) = header.inner;
+        // ── Momentum drain bar ───────────────────────────────────────
+        // Directly under the title, full width: the jot is small, and a
+        // mode that will close it on a pause should be impossible to
+        // miss while it runs.
+        if let Some((left, urgency)) = momentum {
+            let calm = theme::accent();
+            let alarm = theme::accent_red();
+            let mix = |a: egui::Color32, b: egui::Color32, t: f32| {
+                let m = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round() as u8;
+                egui::Color32::from_rgb(m(a.r(), b.r()), m(a.g(), b.g()), m(a.b(), b.b()))
+            };
+            let color = mix(calm, alarm, urgency * urgency);
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new("Momentum")
+                        .size(10.5)
+                        .color(theme::text_dim()),
+                );
+                ui.label(
+                    RichText::new(format!("{left:.1}s"))
+                        .size(11.5)
+                        .monospace()
+                        .strong()
+                        .color(color),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(
+                        RichText::new(if self.buffer.as_str().trim().is_empty() {
+                            "pause cancels"
+                        } else {
+                            "pause saves"
+                        })
+                        .size(10.5)
+                        .color(theme::text_dim()),
+                    );
+                });
+            });
+            let (rect, _) =
+                ui.allocate_exact_size(egui::vec2(ui.available_width(), 3.0), egui::Sense::hover());
+            let p = ui.painter();
+            p.rect_filled(rect, 1.5, theme::bg_raised());
+            let mut filled = rect;
+            filled.set_width(rect.width() * (1.0 - urgency).clamp(0.0, 1.0));
+            p.rect_filled(filled, 1.5, color);
+        }
         if close_clicked && !self.busy {
             self.open = false;
             self.clear_text();
@@ -370,5 +447,21 @@ impl JotWindow {
             action = JotAction::Submit;
         }
         action
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The rule as requested: nothing typed cancels, anything typed
+    /// saves — and whitespace is nothing, because appending a stray
+    /// space would timestamp an empty entry into the note.
+    #[test]
+    fn a_pause_saves_writing_and_cancels_nothing() {
+        assert_eq!(expiry_outcome(""), JotOutcome::Cancel);
+        assert_eq!(expiry_outcome("   \n\t "), JotOutcome::Cancel);
+        assert_eq!(expiry_outcome("bought stamps"), JotOutcome::Submit);
+        assert_eq!(expiry_outcome("  x  "), JotOutcome::Submit);
     }
 }

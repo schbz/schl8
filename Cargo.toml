@@ -1,6 +1,6 @@
 [package]
 name = "schl8"
-version = "1.0.43"
+version = "1.0.44"
 edition = "2021"
 rust-version = "1.75"
 description = "Schuyler's Lightweight Armored Text Editor — secure macOS-native viewer, editor, and encryptor for GPG-encrypted files"

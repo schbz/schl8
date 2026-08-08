@@ -9,6 +9,7 @@ pub mod highlight;
 pub mod keybindings;
 pub mod markdown;
 pub mod menu;
+pub mod missing_file;
 pub mod momentum;
 pub mod quicknote;
 pub mod quicknotes_manager;

@@ -305,6 +305,13 @@ compute themselves.
 **Recent files and stats.** The picker lists recent files with sizes and dates.
 View → Statistics adds a live word/character/line card while you read or write.
 
+**When a file has gone missing, Schl8 says so — and says where else it is.**
+Opening a file that was deleted or moved (from Favorites, the menu bar,
+recents, anywhere) raises an alert naming the missing location instead of
+failing silently. Better: since save plans and quicknote rules fan each save
+out to several destinations, the alert lists every other copy the
+configuration knows about that still exists, each one click from opening.
+
 ### Editing, encrypting, saving
 
 **`Cmd+E` toggles edit mode.** The whole window becomes the editor — no inner
@@ -369,6 +376,12 @@ powerful. Register up to **25** files. Each one can have:
   under different keys.
 - **No explicit keys at all**, in which case appends re-encrypt in place to the
   file's own existing recipients. This is the simple case and the default.
+- **Momentum**, which turns every jot into a self-finishing capture: stop
+  typing for a few seconds (the pause in Settings → Momentum) and whatever you
+  wrote is appended — or, if you wrote nothing, the jot simply closes. A drain
+  bar in the jot shows the deal while it runs. Capture without a decision: you
+  either made the note or you didn't, and either way you're back where you
+  were.
 
 The same window creates brand-new encrypted quicknote files from scratch: pick
 the key(s) and location(s) and the file exists immediately, encrypted, having
@@ -475,6 +488,10 @@ editor is open: a document you're reading was never gathering momentum.
 The mode is per session and never persisted. A setting that locks your
 document on a pause shouldn't be inherited from the last time the app ran.
 
+Quicknotes can opt in per note (File → Quick Note Files… → Momentum). There a
+pause doesn't lock — it *finishes*: typed text is appended to the note and an
+empty jot closes, so a capture window never sits open waiting for a decision.
+
 > **What it's for.** Morning pages. A first draft you keep rewriting the
 > opening of. Any writing where the problem is not what to say but the habit of
 > stopping to check.
@@ -565,7 +582,9 @@ column.
 shortcuts that work *right now*, read from your own bindings and your keyboard
 layout, and filtered by what the app is doing. The motion keys are hidden in
 edit mode, where those letters are text rather than commands, and named
-correctly on Dvorak, Colemak and Workman, where they aren't `j`/`k`.
+correctly on Dvorak, Colemak and Workman, where they aren't `j`/`k`. Both this
+card and the statistics card can be dragged anywhere; where you drop them
+sticks for the session.
 
 **Interface scale** — the "Font size" slider in Settings, which zooms the whole
 interface rather than only the body text, for high-density displays or tired
@@ -695,6 +714,7 @@ time_format = "%H:%M"
 # name = "worklog"
 # source = "/Users/you/Documents/Schl8/worklog.md.gpg"
 # hotkey = "ctrl+cmd+1"
+# momentum = false           # true: a pause appends the jot (or closes it empty)
 
 [momentum]                 # the writing mode; switched on per session
 pause_seconds = 3.0        # stop for longer than this and it locks (1-60)
